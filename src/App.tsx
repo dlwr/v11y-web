@@ -110,6 +110,9 @@ function App() {
       audioUrlRef.current = URL.createObjectURL(blob);
       if (audioRef.current) {
         audioRef.current.src = audioUrlRef.current;
+        // Reset playback state when source changes
+        setIsPlaying(false);
+        setPlaybackTime(0);
       }
     }
 
