@@ -1,10 +1,10 @@
-# v11n-web 開発履歴
+# v11y-web 開発履歴
 
 ## 2025-01-14: 初期実装
 
 ### 完了タスク
 
-- プロジェクト作成 (`ghq create v11n-web`)
+- プロジェクト作成 (`ghq create v11y-web`)
 - Vite + React + TypeScript セットアップ
 - Tailwind CSS 導入 (@tailwindcss/vite)
 - ONNX Runtime Web 導入

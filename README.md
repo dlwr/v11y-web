@@ -1,4 +1,4 @@
-# v11n-web
+# v11y-web
 
 Browser-based AI noise reduction recorder using WebAssembly.
 

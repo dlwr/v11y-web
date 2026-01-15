@@ -1,4 +1,4 @@
-# v11n-web コード構成
+# v11y-web コード構成
 
 ## 概要
 
@@ -14,7 +14,7 @@
 ## ディレクトリ構造
 
 ```
-v11n-web/
+v11y-web/
 ├── public/
 │   └── models/
 │       └── nsnet2-48k.onnx    # NSNet2ノイズ除去モデル (24MB)
@@ -102,7 +102,7 @@ WAV変換 → ダウンロード
 
 ## 元プロジェクトとの対応
 
-| v11y (KMP) | v11n-web |
+| v11y (KMP) | v11y-web |
 |------------|----------|
 | AudioRecorder.android.kt | useRecorder.ts |
 | NoiseReducer.android.kt | noiseReducer.ts |
