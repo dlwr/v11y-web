@@ -1,4 +1,5 @@
 import * as ort from 'onnxruntime-web';
+import { normalizeLoudness } from './audioUtils';
 
 // NSNet2 parameters for 48kHz
 const FFT_SIZE = 1024;
@@ -131,8 +132,10 @@ export async function processAudio(audioData: Float32Array): Promise<Float32Arra
     }
   }
 
-  // Return original length
-  return outputAudio.slice(0, audioData.length);
+  // Return original length with loudness normalization (-16 LUFS for podcast)
+  const denoisedAudio = outputAudio.slice(0, audioData.length);
+  console.log('Applying loudness normalization to -16 LUFS...');
+  return normalizeLoudness(denoisedAudio);
 }
 
 function createHannWindow(size: number): Float32Array {
