@@ -156,6 +156,10 @@ function App() {
     setPlaybackTime(0);
   };
 
+  const handlePause = () => {
+    setIsPlaying(false);
+  };
+
   const handleDownload = () => {
     const data = useProcessed && processedAudio ? processedAudio : audioData;
     if (data) {
@@ -186,6 +190,7 @@ function App() {
         ref={audioRef}
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
+        onPause={handlePause}
         className="hidden"
       />
 
