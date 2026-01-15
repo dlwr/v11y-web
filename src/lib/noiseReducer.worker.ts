@@ -1,4 +1,5 @@
 import * as ort from 'onnxruntime-web';
+import { enhanceVoice } from './audioEnhancer';
 
 // NSNet2 parameters for 48kHz
 const FFT_SIZE = 1024;
@@ -128,9 +129,14 @@ async function processAudio(audioData: Float32Array): Promise<Float32Array> {
     }
   }
 
-  // Return original length with loudness normalization (-16 LUFS for podcast)
+  // Return original length
   const denoisedAudio = outputAudio.slice(0, audioData.length);
-  return normalizeLoudness(denoisedAudio);
+
+  // Apply voice enhancement pipeline (compressor, EQ, de-esser, etc.)
+  const enhanced = enhanceVoice(denoisedAudio);
+
+  // Final loudness normalization (-16 LUFS for podcast)
+  return normalizeLoudness(enhanced);
 }
 
 function createHannWindow(size: number): Float32Array {
