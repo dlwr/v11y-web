@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useLayoutEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 
 export type RecordingState = 'idle' | 'recording' | 'paused' | 'processing';
 
@@ -33,18 +33,12 @@ export function useRecorder(): UseRecorderReturn {
   const isCapturingRef = useRef<boolean>(false);
   const isAnimatingRef = useRef<boolean>(false);
 
-  // Refs for setState functions to avoid closure issues
-  const setAmplitudeRef = useRef(setAmplitude);
-  const setDurationRef = useRef(setDuration);
+  // Animation loop ref - allows self-referencing without ESLint errors
+  const animationLoopRef = useRef<(() => void) | undefined>(undefined);
 
-  // Animation loop using refs to avoid closure and self-reference issues
-  const animationLoopRef = useRef<(() => void) | null>(null);
-
-  // Update refs synchronously before paint using useLayoutEffect
-  useLayoutEffect(() => {
-    setAmplitudeRef.current = setAmplitude;
-    setDurationRef.current = setDuration;
-    animationLoopRef.current = () => {
+  const startAnimationLoop = useCallback(() => {
+    // Define the loop function here, storing in ref for self-reference
+    const loop = () => {
       if (!isAnimatingRef.current) return;
 
       if (analyserRef.current) {
@@ -57,19 +51,19 @@ export function useRecorder(): UseRecorderReturn {
           sum += value * value;
         }
         const rms = Math.sqrt(sum / dataArray.length);
-        setAmplitudeRef.current(Math.min(1, rms * 3));
+        setAmplitude(Math.min(1, rms * 3));
 
         const elapsed = (Date.now() - startTimeRef.current) / 1000 + pausedDurationRef.current;
-        setDurationRef.current(elapsed);
+        setDuration(elapsed);
       }
 
+      // Schedule next frame using ref
       animationFrameRef.current = requestAnimationFrame(() => animationLoopRef.current?.());
     };
-  }, [setAmplitude, setDuration]);
 
-  const startAnimationLoop = useCallback(() => {
-    animationFrameRef.current = requestAnimationFrame(() => animationLoopRef.current?.());
-  }, []);
+    animationLoopRef.current = loop;
+    animationFrameRef.current = requestAnimationFrame(loop);
+  }, [setAmplitude, setDuration]);
 
   const startRecording = useCallback(async () => {
     try {
