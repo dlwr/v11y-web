@@ -47,8 +47,8 @@ function App() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [modelLoading, setModelLoading] = useState(true);
 
-  // Keep screen awake during recording
-  useWakeLock(appState === 'recording');
+  // Keep screen awake during recording and processing
+  useWakeLock(appState === 'recording' || isProcessing);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioUrlRef = useRef<string | null>(null);
