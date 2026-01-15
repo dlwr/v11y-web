@@ -195,11 +195,13 @@ function App() {
   };
 
   const handleDownload = () => {
-    const data = useProcessed && processedAudio ? processedAudio : audioData;
+    const isEnhanced = useProcessed && processedAudio;
+    const data = isEnhanced ? processedAudio : audioData;
     if (data) {
       const blob = floatToWav(data);
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      downloadBlob(blob, `recording-${timestamp}.wav`);
+      const suffix = isEnhanced ? 'enhanced' : 'original';
+      downloadBlob(blob, `recording-${timestamp}-${suffix}.wav`);
     }
   };
 
