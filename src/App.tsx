@@ -6,6 +6,38 @@ import './App.css';
 
 type AppState = 'home' | 'recording' | 'playback';
 
+// Keep screen awake during recording
+function useWakeLock(enabled: boolean) {
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+
+  useEffect(() => {
+    const requestWakeLock = async () => {
+      if (enabled && 'wakeLock' in navigator) {
+        try {
+          wakeLockRef.current = await navigator.wakeLock.request('screen');
+        } catch (err) {
+          console.warn('Wake Lock not available:', err);
+        }
+      }
+    };
+
+    const releaseWakeLock = () => {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      }
+    };
+
+    if (enabled) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+
+    return () => releaseWakeLock();
+  }, [enabled]);
+}
+
 function App() {
   const [appState, setAppState] = useState<AppState>('home');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -15,13 +47,16 @@ function App() {
   const [playbackTime, setPlaybackTime] = useState(0);
   const [modelLoading, setModelLoading] = useState(true);
 
+  // Keep screen awake during recording
+  useWakeLock(appState === 'recording');
+
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioUrlRef = useRef<string | null>(null);
 
   const {
     state: recordingState,
     duration,
-    amplitude,
+    frequencyData,
     audioData,
     startRecording,
     stopRecording,
@@ -182,12 +217,18 @@ function App() {
       {/* Recording Screen */}
       {appState === 'recording' && (
         <div className="flex flex-col items-center w-full max-w-md">
-          {/* Waveform visualization */}
-          <div className="w-full h-32 bg-gray-800/50 rounded-lg mb-6 flex items-center justify-center overflow-hidden">
-            <div
-              className="w-4 bg-red-500 rounded-full transition-all duration-75"
-              style={{ height: `${Math.max(8, amplitude * 100)}%` }}
-            />
+          {/* Waveform visualization - frequency bars */}
+          <div className="w-full h-32 bg-gray-800/50 rounded-lg mb-6 flex items-end justify-center gap-1 overflow-hidden px-4">
+            {(frequencyData.length > 0 ? frequencyData : Array(20).fill(0)).map((value, i) => {
+              const barHeight = Math.max(8, value * 100);
+              return (
+                <div
+                  key={i}
+                  className="flex-1 bg-red-500 rounded-t transition-all duration-75"
+                  style={{ height: `${barHeight}%` }}
+                />
+              );
+            })}
           </div>
 
           {/* Duration */}

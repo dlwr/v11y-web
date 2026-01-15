@@ -13,11 +13,9 @@ let ortSession: ort.InferenceSession | null = null;
 export async function initNoiseReducer(): Promise<void> {
   if (ortSession) return;
 
-  console.log('Initializing ONNX Runtime...');
   ortSession = await ort.InferenceSession.create('/models/nsnet2-48k.onnx', {
     executionProviders: ['webgl', 'wasm'],
   });
-  console.log('NSNet2 model loaded');
 }
 
 export async function processAudio(audioData: Float32Array): Promise<Float32Array> {
@@ -35,7 +33,6 @@ export async function processAudio(audioData: Float32Array): Promise<Float32Arra
   paddedAudio.set(audioData);
 
   const numFrames = Math.floor((paddedLength - FRAME_SIZE) / HOP_SIZE) + 1;
-  console.log(`Processing ${numFrames} frames`);
 
   // STFT analysis
   const magnitudes: Float32Array[] = [];
@@ -81,12 +78,9 @@ export async function processAudio(audioData: Float32Array): Promise<Float32Arra
   }
 
   // Run inference
-  console.log('Running NSNet2 inference...');
   const inputTensor = new ort.Tensor('float32', inputData, [1, numFrames, NUM_BINS]);
   const results = await ortSession.run({ input: inputTensor });
   const outputData = results[Object.keys(results)[0]].data as Float32Array;
-
-  console.log('NSNet2 inference complete');
 
   // Reconstruct audio with mask applied
   const outputAudio = new Float32Array(paddedLength);
@@ -134,7 +128,6 @@ export async function processAudio(audioData: Float32Array): Promise<Float32Arra
 
   // Return original length with loudness normalization (-16 LUFS for podcast)
   const denoisedAudio = outputAudio.slice(0, audioData.length);
-  console.log('Applying loudness normalization to -16 LUFS...');
   return normalizeLoudness(denoisedAudio);
 }
 

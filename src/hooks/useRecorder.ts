@@ -6,6 +6,7 @@ interface UseRecorderReturn {
   state: RecordingState;
   duration: number;
   amplitude: number;
+  frequencyData: number[];
   audioData: Float32Array | null;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
@@ -19,6 +20,7 @@ export function useRecorder(): UseRecorderReturn {
   const [state, setState] = useState<RecordingState>('idle');
   const [duration, setDuration] = useState(0);
   const [amplitude, setAmplitude] = useState(0);
+  const [frequencyData, setFrequencyData] = useState<number[]>([]);
   const [audioData, setAudioData] = useState<Float32Array | null>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -37,7 +39,6 @@ export function useRecorder(): UseRecorderReturn {
   const animationLoopRef = useRef<(() => void) | undefined>(undefined);
 
   const startAnimationLoop = useCallback(() => {
-    // Define the loop function here, storing in ref for self-reference
     const loop = () => {
       if (!isAnimatingRef.current) return;
 
@@ -51,7 +52,33 @@ export function useRecorder(): UseRecorderReturn {
           sum += value * value;
         }
         const rms = Math.sqrt(sum / dataArray.length);
-        setAmplitude(Math.min(1, rms * 3));
+        // Amplify the signal more (was *3, now *30) for better visualization
+        const amplifiedRms = Math.min(1, rms * 30);
+        setAmplitude(amplifiedRms);
+
+        // Get frequency data for waveform visualization (sample 20 bars)
+        const freqArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getByteFrequencyData(freqArray);
+
+        // Use logarithmic frequency scaling for more balanced visualization
+        // Human hearing is logarithmic, so lower frequencies have more energy
+        const binWidth = SAMPLE_RATE / analyserRef.current.fftSize;
+        const minFreq = 100;
+        const maxFreq = 4000;
+
+        const bars: number[] = [];
+        for (let i = 0; i < 20; i++) {
+          // Logarithmic frequency mapping
+          const t = i / 19;
+          const freq = minFreq * Math.pow(maxFreq / minFreq, t);
+          const binIndex = Math.floor(freq / binWidth);
+
+          // Stronger compensation for low frequencies (they naturally have more energy)
+          const freqCompensation = 0.3 + (i / 19) * 2.5; // 0.3 to 2.8
+          const normalizedValue = Math.min(1, (freqArray[binIndex] / 255) * freqCompensation);
+          bars.push(normalizedValue);
+        }
+        setFrequencyData(bars);
 
         const elapsed = (Date.now() - startTimeRef.current) / 1000 + pausedDurationRef.current;
         setDuration(elapsed);
@@ -85,8 +112,17 @@ export function useRecorder(): UseRecorderReturn {
       // Use ScriptProcessorNode for raw audio data capture
       const processor = audioContext.createScriptProcessor(4096, 1, 1);
 
+      // Create a silent gain node to connect analyser without audio output
+      const silentGain = audioContext.createGain();
+      silentGain.gain.value = 0;
+
+      // Connect source to analyser (for visualization) and processor (for recording)
       source.connect(analyser);
-      analyser.connect(processor);
+      source.connect(processor);
+      // Connect analyser through silent gain to destination (needed for analyser to work)
+      analyser.connect(silentGain);
+      silentGain.connect(audioContext.destination);
+      // Processor needs to connect to destination to work
       processor.connect(audioContext.destination);
 
       isCapturingRef.current = true;
@@ -177,6 +213,7 @@ export function useRecorder(): UseRecorderReturn {
     state,
     duration,
     amplitude,
+    frequencyData,
     audioData,
     startRecording,
     stopRecording,
