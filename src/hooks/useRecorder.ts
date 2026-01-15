@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 export type RecordingState = 'idle' | 'recording' | 'paused' | 'processing';
 
@@ -32,26 +32,29 @@ export function useRecorder(): UseRecorderReturn {
   const animationFrameRef = useRef<number>(0);
   const isCapturingRef = useRef<boolean>(false);
   const isAnimatingRef = useRef<boolean>(false);
+  const updateAmplitudeRef = useRef<() => void>(() => {});
 
-  const updateAmplitude = useCallback(() => {
-    if (analyserRef.current && isAnimatingRef.current) {
-      const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-      analyserRef.current.getByteTimeDomainData(dataArray);
+  useEffect(() => {
+    updateAmplitudeRef.current = () => {
+      if (analyserRef.current && isAnimatingRef.current) {
+        const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+        analyserRef.current.getByteTimeDomainData(dataArray);
 
-      let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        const value = (dataArray[i] - 128) / 128;
-        sum += value * value;
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          const value = (dataArray[i] - 128) / 128;
+          sum += value * value;
+        }
+        const rms = Math.sqrt(sum / dataArray.length);
+        setAmplitude(Math.min(1, rms * 3));
+
+        const elapsed = (Date.now() - startTimeRef.current) / 1000 + pausedDurationRef.current;
+        setDuration(elapsed);
+
+        animationFrameRef.current = requestAnimationFrame(updateAmplitudeRef.current);
       }
-      const rms = Math.sqrt(sum / dataArray.length);
-      setAmplitude(Math.min(1, rms * 3));
-
-      const elapsed = (Date.now() - startTimeRef.current) / 1000 + pausedDurationRef.current;
-      setDuration(elapsed);
-
-      animationFrameRef.current = requestAnimationFrame(updateAmplitude);
-    }
-  }, []);
+    };
+  });
 
   const startRecording = useCallback(async () => {
     try {
@@ -96,12 +99,12 @@ export function useRecorder(): UseRecorderReturn {
 
       setState('recording');
       isAnimatingRef.current = true;
-      animationFrameRef.current = requestAnimationFrame(updateAmplitude);
+      animationFrameRef.current = requestAnimationFrame(updateAmplitudeRef.current);
     } catch (error) {
       console.error('Failed to start recording:', error);
       throw error;
     }
-  }, [updateAmplitude]);
+  }, []);
 
   const stopRecording = useCallback(() => {
     isAnimatingRef.current = false;
@@ -157,9 +160,9 @@ export function useRecorder(): UseRecorderReturn {
       isCapturingRef.current = true;
       isAnimatingRef.current = true;
       setState('recording');
-      animationFrameRef.current = requestAnimationFrame(updateAmplitude);
+      animationFrameRef.current = requestAnimationFrame(updateAmplitudeRef.current);
     }
-  }, [state, updateAmplitude]);
+  }, [state]);
 
   return {
     state,

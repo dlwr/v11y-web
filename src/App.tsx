@@ -13,7 +13,7 @@ function App() {
   const [useProcessed, setUseProcessed] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
-  const [modelLoading, setModelLoading] = useState(false);
+  const [modelLoading, setModelLoading] = useState(true);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioUrlRef = useRef<string | null>(null);
@@ -31,7 +31,6 @@ function App() {
 
   // Preload model
   useEffect(() => {
-    setModelLoading(true);
     initNoiseReducer()
       .then(() => setModelLoading(false))
       .catch((err) => {
@@ -40,15 +39,7 @@ function App() {
       });
   }, []);
 
-  // Handle recording state changes
-  useEffect(() => {
-    if (recordingState === 'idle' && audioData && audioData.length > 0) {
-      setAppState('playback');
-      processRecording(audioData);
-    }
-  }, [recordingState, audioData]);
-
-  const processRecording = async (data: Float32Array) => {
+  const processRecording = useCallback(async (data: Float32Array) => {
     setIsProcessing(true);
     try {
       const processed = await processAudio(data);
@@ -58,7 +49,19 @@ function App() {
       setProcessedAudio(null);
     }
     setIsProcessing(false);
-  };
+  }, []);
+
+  // Process audio when new audioData becomes available
+  const prevAudioDataRef = useRef<Float32Array | null>(null);
+  useEffect(() => {
+    if (audioData && audioData !== prevAudioDataRef.current && audioData.length > 0) {
+      prevAudioDataRef.current = audioData;
+      // Use queueMicrotask to avoid synchronous setState in effect
+      queueMicrotask(() => {
+        processRecording(audioData);
+      });
+    }
+  }, [audioData, processRecording]);
 
   // Update audio URL when source changes
   useEffect(() => {
@@ -89,6 +92,11 @@ function App() {
 
   const handleStopRecording = () => {
     stopRecording();
+    // State will transition to playback and start processing
+    // We need to wait for audioData to be available
+    setTimeout(() => {
+      setAppState('playback');
+    }, 0);
   };
 
   const handlePlayPause = () => {
