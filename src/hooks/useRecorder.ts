@@ -31,9 +31,10 @@ export function useRecorder(): UseRecorderReturn {
   const pausedDurationRef = useRef<number>(0);
   const animationFrameRef = useRef<number>(0);
   const isCapturingRef = useRef<boolean>(false);
+  const isAnimatingRef = useRef<boolean>(false);
 
   const updateAmplitude = useCallback(() => {
-    if (analyserRef.current && state === 'recording') {
+    if (analyserRef.current && isAnimatingRef.current) {
       const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
       analyserRef.current.getByteTimeDomainData(dataArray);
 
@@ -50,7 +51,7 @@ export function useRecorder(): UseRecorderReturn {
 
       animationFrameRef.current = requestAnimationFrame(updateAmplitude);
     }
-  }, [state]);
+  }, []);
 
   const startRecording = useCallback(async () => {
     try {
@@ -94,14 +95,16 @@ export function useRecorder(): UseRecorderReturn {
       pausedDurationRef.current = 0;
 
       setState('recording');
+      isAnimatingRef.current = true;
       animationFrameRef.current = requestAnimationFrame(updateAmplitude);
     } catch (error) {
       console.error('Failed to start recording:', error);
       throw error;
     }
-  }, [state, updateAmplitude]);
+  }, [updateAmplitude]);
 
   const stopRecording = useCallback(() => {
+    isAnimatingRef.current = false;
     cancelAnimationFrame(animationFrameRef.current);
 
     if (processorRef.current) {
@@ -141,6 +144,7 @@ export function useRecorder(): UseRecorderReturn {
   const pauseRecording = useCallback(() => {
     if (state === 'recording') {
       pausedDurationRef.current = duration;
+      isAnimatingRef.current = false;
       cancelAnimationFrame(animationFrameRef.current);
       isCapturingRef.current = false;
       setState('paused');
@@ -151,6 +155,7 @@ export function useRecorder(): UseRecorderReturn {
     if (state === 'paused') {
       startTimeRef.current = Date.now();
       isCapturingRef.current = true;
+      isAnimatingRef.current = true;
       setState('recording');
       animationFrameRef.current = requestAnimationFrame(updateAmplitude);
     }
