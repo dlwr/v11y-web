@@ -30,6 +30,7 @@ export function useRecorder(): UseRecorderReturn {
   const startTimeRef = useRef<number>(0);
   const pausedDurationRef = useRef<number>(0);
   const animationFrameRef = useRef<number>(0);
+  const isCapturingRef = useRef<boolean>(false);
 
   const updateAmplitude = useCallback(() => {
     if (analyserRef.current && state === 'recording') {
@@ -75,15 +76,13 @@ export function useRecorder(): UseRecorderReturn {
       analyser.connect(processor);
       processor.connect(audioContext.destination);
 
-      const isRecordingRef = { current: true };
+      isCapturingRef.current = true;
       processor.onaudioprocess = (e) => {
-        if (isRecordingRef.current) {
+        if (isCapturingRef.current) {
           const inputData = e.inputBuffer.getChannelData(0);
           chunksRef.current.push(new Float32Array(inputData));
         }
       };
-      // Store reference to control recording state in callback
-      (processor as ScriptProcessorNode & { isRecordingRef?: { current: boolean } }).isRecordingRef = isRecordingRef;
 
       audioContextRef.current = audioContext;
       streamRef.current = stream;
@@ -143,11 +142,7 @@ export function useRecorder(): UseRecorderReturn {
     if (state === 'recording') {
       pausedDurationRef.current = duration;
       cancelAnimationFrame(animationFrameRef.current);
-      // Stop capturing audio data during pause
-      const processor = processorRef.current as ScriptProcessorNode & { isRecordingRef?: { current: boolean } };
-      if (processor?.isRecordingRef) {
-        processor.isRecordingRef.current = false;
-      }
+      isCapturingRef.current = false;
       setState('paused');
     }
   }, [state, duration]);
@@ -155,11 +150,7 @@ export function useRecorder(): UseRecorderReturn {
   const resumeRecording = useCallback(() => {
     if (state === 'paused') {
       startTimeRef.current = Date.now();
-      // Resume capturing audio data
-      const processor = processorRef.current as ScriptProcessorNode & { isRecordingRef?: { current: boolean } };
-      if (processor?.isRecordingRef) {
-        processor.isRecordingRef.current = true;
-      }
+      isCapturingRef.current = true;
       setState('recording');
       animationFrameRef.current = requestAnimationFrame(updateAmplitude);
     }
