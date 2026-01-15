@@ -135,9 +135,11 @@ function App() {
       audioUrlRef.current = URL.createObjectURL(blob);
       if (audioRef.current) {
         audioRef.current.src = audioUrlRef.current;
-        // Reset playback state when source changes
-        setIsPlaying(false);
-        setPlaybackTime(0);
+        // Reset playback state when source changes (use queueMicrotask to avoid setState in effect)
+        queueMicrotask(() => {
+          setIsPlaying(false);
+          setPlaybackTime(0);
+        });
       }
     }
 
