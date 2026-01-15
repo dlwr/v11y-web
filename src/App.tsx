@@ -6,6 +6,24 @@ import './App.css';
 
 type AppState = 'home' | 'recording' | 'playback';
 
+// Request notification permission and send notification
+async function sendNotification(title: string, body: string): Promise<void> {
+  if (!('Notification' in window)) return;
+
+  if (Notification.permission === 'default') {
+    await Notification.requestPermission();
+  }
+
+  if (Notification.permission === 'granted') {
+    new Notification(title, {
+      body,
+      icon: '/pwa-192x192.png',
+      badge: '/pwa-192x192.png',
+      tag: 'v11y-processing',
+    });
+  }
+}
+
 // Keep screen awake during recording
 function useWakeLock(enabled: boolean) {
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -79,9 +97,16 @@ function App() {
     try {
       const processed = await processAudio(data);
       setProcessedAudio(processed);
+      // Send notification when processing is complete (useful when app is in background)
+      if (document.hidden) {
+        sendNotification('v11y', 'AI noise reduction complete! Your recording is ready.');
+      }
     } catch (error) {
       console.error('Failed to process audio:', error);
       setProcessedAudio(null);
+      if (document.hidden) {
+        sendNotification('v11y', 'Processing failed. Please try again.');
+      }
     }
     setIsProcessing(false);
   }, []);
@@ -124,6 +149,10 @@ function App() {
   }, [useProcessed, processedAudio, audioData]);
 
   const handleStartRecording = async () => {
+    // Request notification permission on first recording
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
     setAppState('recording');
     await startRecording();
   };
