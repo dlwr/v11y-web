@@ -32,10 +32,12 @@ export function useRecorder(): UseRecorderReturn {
   const animationFrameRef = useRef<number>(0);
   const isCapturingRef = useRef<boolean>(false);
   const isAnimatingRef = useRef<boolean>(false);
-  const updateAmplitudeRef = useRef<() => void>(() => {});
+
+  // Animation loop function stored in ref to avoid closure issues
+  const animationLoopRef = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => {
-    updateAmplitudeRef.current = () => {
+    animationLoopRef.current = () => {
       if (analyserRef.current && isAnimatingRef.current) {
         const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
         analyserRef.current.getByteTimeDomainData(dataArray);
@@ -51,10 +53,14 @@ export function useRecorder(): UseRecorderReturn {
         const elapsed = (Date.now() - startTimeRef.current) / 1000 + pausedDurationRef.current;
         setDuration(elapsed);
 
-        animationFrameRef.current = requestAnimationFrame(updateAmplitudeRef.current);
+        animationFrameRef.current = requestAnimationFrame(() => animationLoopRef.current?.());
       }
     };
   });
+
+  const startAnimationLoop = useCallback(() => {
+    animationFrameRef.current = requestAnimationFrame(() => animationLoopRef.current?.());
+  }, []);
 
   const startRecording = useCallback(async () => {
     try {
@@ -99,12 +105,12 @@ export function useRecorder(): UseRecorderReturn {
 
       setState('recording');
       isAnimatingRef.current = true;
-      animationFrameRef.current = requestAnimationFrame(updateAmplitudeRef.current);
+      startAnimationLoop();
     } catch (error) {
       console.error('Failed to start recording:', error);
       throw error;
     }
-  }, []);
+  }, [startAnimationLoop]);
 
   const stopRecording = useCallback(() => {
     isAnimatingRef.current = false;
@@ -160,9 +166,9 @@ export function useRecorder(): UseRecorderReturn {
       isCapturingRef.current = true;
       isAnimatingRef.current = true;
       setState('recording');
-      animationFrameRef.current = requestAnimationFrame(updateAmplitudeRef.current);
+      startAnimationLoop();
     }
-  }, [state]);
+  }, [state, startAnimationLoop]);
 
   return {
     state,
