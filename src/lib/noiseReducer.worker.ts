@@ -82,7 +82,7 @@ async function processAudio(audioData: Float32Array): Promise<Float32Array> {
   // Run inference
   const inputTensor = new ort.Tensor('float32', inputData, [1, numFrames, NUM_BINS]);
   const results = await ortSession.run({ input: inputTensor });
-  const outputData = results[Object.keys(results)[0]].data as Float32Array;
+  const outputData = results['output'].data as Float32Array;
 
   // Reconstruct audio with mask applied
   const outputAudio = new Float32Array(paddedLength);
