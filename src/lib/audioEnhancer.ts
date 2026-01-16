@@ -1,7 +1,95 @@
 // Professional audio enhancement pipeline for voice
-// Simple but effective: HighPass -> Compressor -> VoiceEQ -> Limiter
+// Chain: DeEsser -> Compressor -> VoiceEQ -> Limiter
 
 const SAMPLE_RATE = 48000;
+
+// ============================================
+// De-Esser - Reduce harsh sibilance (s, sh sounds)
+// ============================================
+function applyDeEsser(
+  audio: Float32Array,
+  threshold: number = -25, // dB - when to start reducing
+  reduction: number = 8 // dB - max reduction amount
+): Float32Array {
+  const output = new Float32Array(audio.length);
+
+  // Bandpass filter to detect sibilance (4-10 kHz range)
+  const detected = applyBandpassFilter(audio, 4000, 10000);
+
+  const thresholdLinear = Math.pow(10, threshold / 20);
+  const maxReduction = Math.pow(10, -reduction / 20);
+
+  // Fast attack, medium release for natural sound
+  const attackSamples = Math.floor(0.0005 * SAMPLE_RATE); // 0.5ms
+  const releaseSamples = Math.floor(0.03 * SAMPLE_RATE); // 30ms
+  let envelope = 0;
+
+  for (let i = 0; i < audio.length; i++) {
+    const detectedLevel = Math.abs(detected[i]);
+
+    // Envelope follower
+    const coeff = detectedLevel > envelope
+      ? 1 - Math.exp(-1 / attackSamples)
+      : 1 - Math.exp(-1 / releaseSamples);
+    envelope += coeff * (detectedLevel - envelope);
+
+    // Calculate gain reduction based on sibilance level
+    let gain = 1;
+    if (envelope > thresholdLinear) {
+      // Soft knee compression on sibilance
+      const overDb = 20 * Math.log10(envelope / thresholdLinear);
+      const reductionDb = Math.min(overDb * 0.7, reduction);
+      gain = Math.pow(10, -reductionDb / 20);
+      gain = Math.max(gain, maxReduction);
+    }
+
+    // Apply reduction proportional to sibilance content
+    const sibilanceRatio = Math.min(1, Math.abs(detected[i]) / (Math.abs(audio[i]) + 1e-10));
+    const effectiveGain = 1 - sibilanceRatio * (1 - gain);
+    output[i] = audio[i] * effectiveGain;
+  }
+
+  return output;
+}
+
+function applyBandpassFilter(input: Float32Array, lowCut: number, highCut: number): Float32Array {
+  // High-pass then low-pass
+  let processed = applyHighPassFilter(input, lowCut);
+  processed = applyLowPassFilter(processed, highCut);
+  return processed;
+}
+
+function applyLowPassFilter(input: Float32Array, cutoff: number): Float32Array {
+  const output = new Float32Array(input.length);
+  const omega = (2 * Math.PI * cutoff) / SAMPLE_RATE;
+  const cosOmega = Math.cos(omega);
+  const alpha = Math.sin(omega) / (2 * 0.707);
+
+  const b0 = (1 - cosOmega) / 2;
+  const b1 = 1 - cosOmega;
+  const b2 = (1 - cosOmega) / 2;
+  const a0 = 1 + alpha;
+  const a1 = -2 * cosOmega;
+  const a2 = 1 - alpha;
+
+  const nb0 = b0 / a0;
+  const nb1 = b1 / a0;
+  const nb2 = b2 / a0;
+  const na1 = a1 / a0;
+  const na2 = a2 / a0;
+
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+
+  for (let i = 0; i < input.length; i++) {
+    const x0 = input[i];
+    const y0 = nb0 * x0 + nb1 * x1 + nb2 * x2 - na1 * y1 - na2 * y2;
+    output[i] = y0;
+    x2 = x1; x1 = x0;
+    y2 = y1; y1 = y0;
+  }
+
+  return output;
+}
 
 // ============================================
 // Simple Compressor - Make voice consistent
@@ -246,14 +334,16 @@ function applyLimiter(audio: Float32Array, ceiling: number = -1): Float32Array {
 // Main Enhancement Pipeline
 // ============================================
 export function enhanceVoice(audio: Float32Array): Float32Array {
-  // Simple, effective chain:
-  // 1. Compressor - Even out dynamics, make voice punchy
-  let processed = applyCompressor(audio);
+  // 1. De-Esser - Reduce harsh sibilance FIRST (before compression amplifies it)
+  let processed = applyDeEsser(audio);
 
-  // 2. Voice EQ - Shape frequency response
+  // 2. Compressor - Even out dynamics, make voice punchy
+  processed = applyCompressor(processed);
+
+  // 3. Voice EQ - Shape frequency response
   processed = applyVoiceEQ(processed);
 
-  // 3. Limiter - Prevent clipping
+  // 4. Limiter - Prevent clipping
   processed = applyLimiter(processed);
 
   return processed;
