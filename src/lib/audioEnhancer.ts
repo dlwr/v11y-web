@@ -166,23 +166,24 @@ function applyBreathReducer(
 
 // ============================================
 // De-Esser - Reduce harsh sibilance (s, sh sounds)
+// Aggressive settings for strong friction sound reduction
 // ============================================
 function applyDeEsser(
   audio: Float32Array,
-  threshold: number = -25, // dB - when to start reducing
-  reduction: number = 8 // dB - max reduction amount
+  threshold: number = -30, // dB - lower threshold = trigger earlier (was -25)
+  reduction: number = 15 // dB - stronger max reduction (was 8)
 ): Float32Array {
   const output = new Float32Array(audio.length);
 
-  // Bandpass filter to detect sibilance (4-10 kHz range)
-  const detected = applyBandpassFilter(audio, 4000, 10000);
+  // Wider bandpass filter to detect sibilance (3-12 kHz range for more coverage)
+  const detected = applyBandpassFilter(audio, 3000, 12000);
 
   const thresholdLinear = Math.pow(10, threshold / 20);
   const maxReduction = Math.pow(10, -reduction / 20);
 
-  // Fast attack, medium release for natural sound
-  const attackSamples = Math.floor(0.0005 * SAMPLE_RATE); // 0.5ms
-  const releaseSamples = Math.floor(0.03 * SAMPLE_RATE); // 30ms
+  // Faster attack for quicker response to sibilants
+  const attackSamples = Math.floor(0.0002 * SAMPLE_RATE); // 0.2ms (was 0.5ms)
+  const releaseSamples = Math.floor(0.025 * SAMPLE_RATE); // 25ms (was 30ms)
   let envelope = 0;
 
   for (let i = 0; i < audio.length; i++) {
@@ -197,16 +198,17 @@ function applyDeEsser(
     // Calculate gain reduction based on sibilance level
     let gain = 1;
     if (envelope > thresholdLinear) {
-      // Soft knee compression on sibilance
+      // More aggressive ratio (0.85 instead of 0.7) for harder compression
       const overDb = 20 * Math.log10(envelope / thresholdLinear);
-      const reductionDb = Math.min(overDb * 0.7, reduction);
+      const reductionDb = Math.min(overDb * 0.85, reduction);
       gain = Math.pow(10, -reductionDb / 20);
       gain = Math.max(gain, maxReduction);
     }
 
-    // Apply reduction proportional to sibilance content
+    // Apply reduction more aggressively to sibilance content
     const sibilanceRatio = Math.min(1, Math.abs(detected[i]) / (Math.abs(audio[i]) + 1e-10));
-    const effectiveGain = 1 - sibilanceRatio * (1 - gain);
+    // Increase the effect multiplier (1.3x) for more noticeable reduction
+    const effectiveGain = 1 - Math.min(1, sibilanceRatio * 1.3) * (1 - gain);
     output[i] = audio[i] * effectiveGain;
   }
 
