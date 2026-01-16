@@ -1,7 +1,168 @@
 // Professional audio enhancement pipeline for voice
-// Chain: DeEsser -> Compressor -> VoiceEQ -> Limiter
+// Chain: NoiseGate -> ClickRemover -> BreathReducer -> DeEsser -> Compressor -> VoiceEQ -> Limiter
 
 const SAMPLE_RATE = 48000;
+
+// ============================================
+// Noise Gate - Silence quiet parts completely
+// ============================================
+function applyNoiseGate(
+  audio: Float32Array,
+  threshold: number = -40, // dB - gate opens above this
+  holdTime: number = 100, // ms - keep gate open after signal drops
+  attack: number = 1, // ms - how fast gate opens
+  release: number = 50 // ms - how fast gate closes
+): Float32Array {
+  const output = new Float32Array(audio.length);
+  const thresholdLinear = Math.pow(10, threshold / 20);
+  const holdSamples = Math.floor((holdTime / 1000) * SAMPLE_RATE);
+  const attackCoeff = 1 - Math.exp(-1 / Math.floor((attack / 1000) * SAMPLE_RATE));
+  const releaseCoeff = 1 - Math.exp(-1 / Math.floor((release / 1000) * SAMPLE_RATE));
+
+  // RMS window for level detection (10ms)
+  const rmsWindowSize = Math.floor(SAMPLE_RATE * 0.01);
+  let gateOpen = false;
+  let holdCounter = 0;
+  let gateGain = 0;
+
+  for (let i = 0; i < audio.length; i++) {
+    // Calculate RMS level
+    let sumSquared = 0;
+    const start = Math.max(0, i - rmsWindowSize);
+    for (let j = start; j <= i; j++) {
+      sumSquared += audio[j] * audio[j];
+    }
+    const rms = Math.sqrt(sumSquared / (i - start + 1));
+
+    // Gate logic with hold
+    if (rms > thresholdLinear) {
+      gateOpen = true;
+      holdCounter = holdSamples;
+    } else if (holdCounter > 0) {
+      holdCounter--;
+    } else {
+      gateOpen = false;
+    }
+
+    // Smooth gate transitions
+    const targetGain = gateOpen ? 1 : 0;
+    const coeff = targetGain > gateGain ? attackCoeff : releaseCoeff;
+    gateGain += coeff * (targetGain - gateGain);
+
+    output[i] = audio[i] * gateGain;
+  }
+
+  return output;
+}
+
+// ============================================
+// Click/Pop Remover - Remove short transient noises
+// ============================================
+function applyClickRemover(audio: Float32Array): Float32Array {
+  const output = new Float32Array(audio);
+
+  // Detect clicks by looking for sudden amplitude changes
+  const windowSize = Math.floor(SAMPLE_RATE * 0.002); // 2ms window
+  const clickThreshold = 3.0; // Ratio of sample to local average
+
+  for (let i = windowSize; i < audio.length - windowSize; i++) {
+    // Calculate local average (excluding current sample)
+    let sum = 0;
+    for (let j = i - windowSize; j < i; j++) {
+      sum += Math.abs(audio[j]);
+    }
+    const localAvg = sum / windowSize;
+
+    // If current sample is much larger than local average, it's likely a click
+    if (localAvg > 0.0001 && Math.abs(audio[i]) > localAvg * clickThreshold) {
+      // Check if it's a short transient (not sustained)
+      let isClick = true;
+      for (let j = 1; j <= Math.min(windowSize, audio.length - i - 1); j++) {
+        if (Math.abs(audio[i + j]) > localAvg * clickThreshold * 0.7) {
+          isClick = false; // Sustained signal, not a click
+          break;
+        }
+      }
+
+      if (isClick) {
+        // Interpolate to remove click
+        const before = audio[i - 1];
+        const after = audio[Math.min(i + 2, audio.length - 1)];
+        output[i] = (before + after) / 2;
+        output[i + 1] = after * 0.7 + before * 0.3;
+      }
+    }
+  }
+
+  return output;
+}
+
+// ============================================
+// Breath Reducer - Reduce breath sounds between words
+// ============================================
+function applyBreathReducer(
+  audio: Float32Array,
+  reduction: number = 12 // dB reduction for detected breaths
+): Float32Array {
+  const output = new Float32Array(audio.length);
+  const reductionLinear = Math.pow(10, -reduction / 20);
+
+  // Breath characteristics: low frequency content, moderate amplitude
+  const frameSize = Math.floor(SAMPLE_RATE * 0.03); // 30ms frames
+
+  // Analyze in frames
+  const numFrames = Math.floor(audio.length / frameSize);
+  const frameEnergy: number[] = [];
+  const frameLowRatio: number[] = [];
+
+  for (let f = 0; f < numFrames; f++) {
+    const start = f * frameSize;
+    let totalEnergy = 0;
+    let lowEnergy = 0;
+
+    // Simple energy calculation
+    for (let i = 0; i < frameSize; i++) {
+      const sample = audio[start + i];
+      totalEnergy += sample * sample;
+    }
+
+    // Low-pass filtered energy (approximate low frequency content)
+    let lpState = 0;
+    const lpCoeff = 0.1;
+    for (let i = 0; i < frameSize; i++) {
+      lpState += lpCoeff * (audio[start + i] - lpState);
+      lowEnergy += lpState * lpState;
+    }
+
+    frameEnergy.push(totalEnergy / frameSize);
+    frameLowRatio.push(totalEnergy > 0.00001 ? lowEnergy / totalEnergy : 0);
+  }
+
+  // Find overall speech level
+  const sortedEnergy = [...frameEnergy].sort((a, b) => b - a);
+  const speechLevel = sortedEnergy[Math.floor(numFrames * 0.1)] || 0.001; // Top 10% as speech
+
+  // Detect breath frames: moderate energy, high low-frequency ratio
+  const breathFrames: boolean[] = [];
+  for (let f = 0; f < numFrames; f++) {
+    const energyRatio = frameEnergy[f] / speechLevel;
+    const isBreath = energyRatio > 0.01 && energyRatio < 0.3 && frameLowRatio[f] > 0.5;
+    breathFrames.push(isBreath);
+  }
+
+  // Apply reduction with smooth transitions
+  let currentGain = 1;
+  const smoothCoeff = 1 - Math.exp(-1 / Math.floor(SAMPLE_RATE * 0.01));
+
+  for (let i = 0; i < audio.length; i++) {
+    const frameIdx = Math.min(Math.floor(i / frameSize), numFrames - 1);
+    const targetGain = breathFrames[frameIdx] ? reductionLinear : 1;
+    currentGain += smoothCoeff * (targetGain - currentGain);
+    output[i] = audio[i] * currentGain;
+  }
+
+  return output;
+}
 
 // ============================================
 // De-Esser - Reduce harsh sibilance (s, sh sounds)
@@ -334,16 +495,25 @@ function applyLimiter(audio: Float32Array, ceiling: number = -1): Float32Array {
 // Main Enhancement Pipeline
 // ============================================
 export function enhanceVoice(audio: Float32Array): Float32Array {
-  // 1. De-Esser - Reduce harsh sibilance FIRST (before compression amplifies it)
-  let processed = applyDeEsser(audio);
+  // 1. Noise Gate - Remove quiet noise between speech
+  let processed = applyNoiseGate(audio);
 
-  // 2. Compressor - Even out dynamics, make voice punchy
+  // 2. Click Remover - Remove mouth clicks and pops
+  processed = applyClickRemover(processed);
+
+  // 3. Breath Reducer - Reduce breath sounds
+  processed = applyBreathReducer(processed);
+
+  // 4. De-Esser - Reduce harsh sibilance (before compression amplifies it)
+  processed = applyDeEsser(processed);
+
+  // 5. Compressor - Even out dynamics, make voice punchy
   processed = applyCompressor(processed);
 
-  // 3. Voice EQ - Shape frequency response
+  // 6. Voice EQ - Shape frequency response
   processed = applyVoiceEQ(processed);
 
-  // 4. Limiter - Prevent clipping
+  // 7. Limiter - Prevent clipping
   processed = applyLimiter(processed);
 
   return processed;
