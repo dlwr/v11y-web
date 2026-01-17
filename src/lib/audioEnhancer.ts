@@ -1,29 +1,217 @@
 // Professional audio enhancement pipeline for voice
-// Chain: NoiseGate -> ClickRemover -> BreathReducer -> DeEsser -> Compressor -> VoiceEQ -> Limiter
+// Chain: AdaptiveNoiseGate -> ClickRemover -> BreathReducer -> DeEsser -> Compressor -> VoiceEQ -> Limiter
 
 const SAMPLE_RATE = 48000;
 
 // ============================================
-// Noise Gate - Silence quiet parts completely
+// Audio Analysis - Analyze audio levels for adaptive processing
 // ============================================
-function applyNoiseGate(
+interface AudioAnalysis {
+  p10Db: number; // 10th percentile (noise floor estimate)
+  p90Db: number; // 90th percentile (speech peaks)
+  estimatedSnr: number; // Signal-to-noise ratio
+  speechLikelihoodFrames: number[]; // Per-frame speech probability
+}
+
+interface AdaptiveGateConfig {
+  threshold: number; // Calculated adaptive threshold in dB
+  holdTime: number; // Adjusted hold time in ms
+  softKnee: number; // Soft knee width in dB
+}
+
+function analyzeAudioLevels(audio: Float32Array): AudioAnalysis {
+  const frameSize = Math.floor(SAMPLE_RATE * 0.03); // 30ms frames
+  const numFrames = Math.floor(audio.length / frameSize);
+
+  if (numFrames === 0) {
+    return {
+      p10Db: -60,
+      p90Db: -30,
+      estimatedSnr: 30,
+      speechLikelihoodFrames: [],
+    };
+  }
+
+  // Calculate RMS for each frame
+  const frameRmsDb: number[] = [];
+  for (let f = 0; f < numFrames; f++) {
+    const start = f * frameSize;
+    let sumSquared = 0;
+    for (let i = 0; i < frameSize; i++) {
+      sumSquared += audio[start + i] * audio[start + i];
+    }
+    const rms = Math.sqrt(sumSquared / frameSize);
+    const rmsDb = 20 * Math.log10(rms + 1e-10);
+    frameRmsDb.push(rmsDb);
+  }
+
+  // Sort for percentile calculation
+  const sorted = [...frameRmsDb].sort((a, b) => a - b);
+  const p10Db = sorted[Math.floor(numFrames * 0.1)] ?? -80;
+  const p90Db = sorted[Math.floor(numFrames * 0.9)] ?? -30;
+  const estimatedSnr = p90Db - p10Db;
+
+  // Calculate speech likelihood for each frame
+  const speechLikelihoodFrames = calculateSpeechLikelihood(
+    audio,
+    numFrames,
+    frameSize
+  );
+
+  return {
+    p10Db,
+    p90Db,
+    estimatedSnr,
+    speechLikelihoodFrames,
+  };
+}
+
+function calculateSpeechLikelihood(
   audio: Float32Array,
-  threshold: number = -40, // dB - gate opens above this
-  holdTime: number = 100, // ms - keep gate open after signal drops
-  attack: number = 1, // ms - how fast gate opens
-  release: number = 50 // ms - how fast gate closes
+  numFrames: number,
+  frameSize: number
+): number[] {
+  const likelihood: number[] = [];
+
+  for (let f = 0; f < numFrames; f++) {
+    const start = f * frameSize;
+
+    // Feature 1: Energy
+    let energy = 0;
+    for (let i = 0; i < frameSize; i++) {
+      energy += audio[start + i] * audio[start + i];
+    }
+    energy /= frameSize;
+
+    // Feature 2: Zero-crossing rate (ZCR) - speech typically has lower ZCR than noise
+    let zcr = 0;
+    for (let i = 1; i < frameSize; i++) {
+      if ((audio[start + i] >= 0) !== (audio[start + i - 1] >= 0)) {
+        zcr++;
+      }
+    }
+    zcr /= frameSize;
+
+    // Feature 3: Low-frequency energy ratio (speech has more low-freq content)
+    const cutoff = 500;
+    const alpha = 1 - Math.exp((-2 * Math.PI * cutoff) / SAMPLE_RATE);
+    let lpState = 0;
+    let lowEnergy = 0;
+    for (let i = 0; i < frameSize; i++) {
+      lpState += alpha * (audio[start + i] - lpState);
+      lowEnergy += lpState * lpState;
+    }
+    lowEnergy /= frameSize;
+    const lfRatio = lowEnergy / (energy + 1e-10);
+
+    // Feature 4: Autocorrelation at lag 1 (high = periodic = likely speech)
+    let ac1 = 0;
+    for (let i = 1; i < frameSize; i++) {
+      ac1 += audio[start + i] * audio[start + i - 1];
+    }
+    ac1 /= frameSize - 1;
+    const normalizedAc1 = ac1 / (energy + 1e-10);
+
+    // Combine features into speech likelihood
+    let score = 0;
+
+    // Energy contribution (higher energy = more likely speech)
+    const energyDb = 10 * Math.log10(energy + 1e-10);
+    score += 0.3 * sigmoid((energyDb + 50) / 10);
+
+    // ZCR contribution (lower ZCR = more likely speech)
+    score += 0.2 * (1 - sigmoid((zcr - 0.1) / 0.05));
+
+    // Low-frequency ratio (higher = more likely voiced speech)
+    score += 0.25 * sigmoid((lfRatio - 0.3) / 0.1);
+
+    // Autocorrelation (higher = more periodic = likely speech)
+    score += 0.25 * sigmoid(normalizedAc1 / 0.3);
+
+    likelihood.push(Math.max(0, Math.min(1, score)));
+  }
+
+  // Apply median filter to smooth out spurious detections
+  return medianFilter(likelihood, 3);
+}
+
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-x));
+}
+
+function medianFilter(arr: number[], windowSize: number): number[] {
+  const result: number[] = [];
+  const halfWindow = Math.floor(windowSize / 2);
+
+  for (let i = 0; i < arr.length; i++) {
+    const start = Math.max(0, i - halfWindow);
+    const end = Math.min(arr.length, i + halfWindow + 1);
+    const window = arr.slice(start, end).sort((a, b) => a - b);
+    result.push(window[Math.floor(window.length / 2)]);
+  }
+
+  return result;
+}
+
+function calculateAdaptiveThreshold(analysis: AudioAnalysis): AdaptiveGateConfig {
+  const { p10Db, p90Db, estimatedSnr } = analysis;
+
+  // Calculate margin based on SNR
+  let margin: number;
+  if (estimatedSnr > 30) {
+    margin = 6; // High SNR: aggressive gating
+  } else if (estimatedSnr > 20) {
+    margin = 10; // Medium SNR: balanced
+  } else if (estimatedSnr > 10) {
+    margin = 15; // Low SNR: conservative (preserve quiet speech)
+  } else {
+    margin = 20; // Very low SNR: minimal gating
+  }
+
+  // Base threshold: noise floor + margin
+  let threshold = p10Db + margin;
+
+  // Ensure threshold doesn't cut quiet speech
+  // Quiet speech is typically 15dB below peak speech level
+  const quietSpeechEstimate = p90Db - 15;
+  const maxThreshold = quietSpeechEstimate - 3;
+  threshold = Math.min(threshold, maxThreshold);
+
+  // Absolute limits
+  threshold = Math.max(-60, Math.min(-25, threshold));
+
+  // Adjust hold time and soft knee based on SNR
+  const holdTime = estimatedSnr > 20 ? 100 : estimatedSnr > 10 ? 150 : 200;
+  const softKnee = estimatedSnr > 20 ? 3 : 6;
+
+  return { threshold, holdTime, softKnee };
+}
+
+// ============================================
+// Adaptive Noise Gate - Preserves quiet speech
+// ============================================
+function applyAdaptiveNoiseGate(
+  audio: Float32Array,
+  config: AdaptiveGateConfig,
+  speechLikelihood: number[]
 ): Float32Array {
   const output = new Float32Array(audio.length);
-  const thresholdLinear = Math.pow(10, threshold / 20);
-  const holdSamples = Math.floor((holdTime / 1000) * SAMPLE_RATE);
-  const attackCoeff = 1 - Math.exp(-1 / Math.floor((attack / 1000) * SAMPLE_RATE));
-  const releaseCoeff = 1 - Math.exp(-1 / Math.floor((release / 1000) * SAMPLE_RATE));
 
-  // RMS window for level detection (10ms)
-  const rmsWindowSize = Math.floor(SAMPLE_RATE * 0.01);
-  let gateOpen = false;
-  let holdCounter = 0;
+  const { threshold, holdTime, softKnee } = config;
+  const thresholdLinear = Math.pow(10, threshold / 20);
+  const softKneeLinear = softKnee / 20;
+
+  const holdSamples = Math.floor((holdTime / 1000) * SAMPLE_RATE);
+  const attackCoeff =
+    1 - Math.exp(-1 / Math.floor((1 / 1000) * SAMPLE_RATE)); // 1ms attack
+  const releaseCoeff =
+    1 - Math.exp(-1 / Math.floor((50 / 1000) * SAMPLE_RATE)); // 50ms release
+
+  const rmsWindowSize = Math.floor(SAMPLE_RATE * 0.01); // 10ms
+  const frameSize = Math.floor(SAMPLE_RATE * 0.03); // Match VAD frame size
+
   let gateGain = 0;
+  let holdCounter = 0;
 
   for (let i = 0; i < audio.length; i++) {
     // Calculate RMS level
@@ -34,18 +222,48 @@ function applyNoiseGate(
     }
     const rms = Math.sqrt(sumSquared / (i - start + 1));
 
-    // Gate logic with hold
-    if (rms > thresholdLinear) {
-      gateOpen = true;
+    // Get speech likelihood for this sample
+    const frameIdx = Math.min(
+      Math.floor(i / frameSize),
+      speechLikelihood.length - 1
+    );
+    const speechProb = speechLikelihood[frameIdx] ?? 0;
+
+    // Adjust effective threshold based on speech likelihood
+    // If high speech probability, lower the threshold to preserve speech
+    const speechProtection = speechProb * 6; // Up to 6dB protection
+    const effectiveThreshold =
+      thresholdLinear * Math.pow(10, -speechProtection / 20);
+
+    // Soft knee calculation
+    let targetGain: number;
+    if (rms > effectiveThreshold * (1 + softKneeLinear)) {
+      // Above threshold + knee: full open
+      targetGain = 1;
       holdCounter = holdSamples;
+    } else if (rms > effectiveThreshold * (1 - softKneeLinear)) {
+      // In soft knee region: gradual transition
+      const kneePosition =
+        (rms / effectiveThreshold - (1 - softKneeLinear)) / (2 * softKneeLinear);
+      targetGain = kneePosition;
+      if (kneePosition > 0.5) holdCounter = holdSamples;
     } else if (holdCounter > 0) {
+      // In hold period
       holdCounter--;
+      targetGain = 1;
     } else {
-      gateOpen = false;
+      // Below threshold: close gate
+      targetGain = 0;
+    }
+
+    // Additional speech protection: never fully close if speech likely
+    if (speechProb > 0.7) {
+      targetGain = Math.max(targetGain, 0.5); // Keep at least 50% gain
+    } else if (speechProb > 0.4) {
+      targetGain = Math.max(targetGain, 0.2); // Keep at least 20% gain
     }
 
     // Smooth gate transitions
-    const targetGain = gateOpen ? 1 : 0;
     const coeff = targetGain > gateGain ? attackCoeff : releaseCoeff;
     gateGain += coeff * (targetGain - gateGain);
 
@@ -497,8 +715,16 @@ function applyLimiter(audio: Float32Array, ceiling: number = -1): Float32Array {
 // Main Enhancement Pipeline
 // ============================================
 export function enhanceVoice(audio: Float32Array): Float32Array {
-  // 1. Noise Gate - Remove quiet noise between speech
-  let processed = applyNoiseGate(audio);
+  // 0. Analyze audio to calculate adaptive parameters
+  const analysis = analyzeAudioLevels(audio);
+  const gateConfig = calculateAdaptiveThreshold(analysis);
+
+  // 1. Adaptive Noise Gate - Remove quiet noise while preserving quiet speech
+  let processed = applyAdaptiveNoiseGate(
+    audio,
+    gateConfig,
+    analysis.speechLikelihoodFrames
+  );
 
   // 2. Click Remover - Remove mouth clicks and pops
   processed = applyClickRemover(processed);
