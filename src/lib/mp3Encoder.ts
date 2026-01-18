@@ -5,9 +5,9 @@ const BIT_RATE = 192; // kbps
 const CHUNK_SIZE = 1152; // MP3 frame size
 
 /**
- * Convert Float32Array to MP3 Blob
+ * Convert Float32Array to MP3 Blob (async to avoid blocking UI)
  */
-export function floatToMp3(audioData: Float32Array): Blob {
+export async function floatToMp3(audioData: Float32Array): Promise<Blob> {
   // Convert Float32 to Int16
   const int16Data = floatToInt16(audioData);
 
@@ -16,12 +16,20 @@ export function floatToMp3(audioData: Float32Array): Blob {
 
   const mp3Chunks: ArrayBuffer[] = [];
 
-  // Encode in chunks
-  for (let i = 0; i < int16Data.length; i += CHUNK_SIZE) {
-    const chunk = int16Data.subarray(i, i + CHUNK_SIZE);
-    const mp3Chunk = encoder.encodeBuffer(chunk);
-    if (mp3Chunk.length > 0) {
-      mp3Chunks.push(new Uint8Array(mp3Chunk).buffer);
+  // Process in batches to avoid blocking UI
+  const BATCH_SIZE = CHUNK_SIZE * 100; // Process 100 chunks at a time
+
+  for (let i = 0; i < int16Data.length; i += BATCH_SIZE) {
+    // Yield to browser between batches
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const batchEnd = Math.min(i + BATCH_SIZE, int16Data.length);
+    for (let j = i; j < batchEnd; j += CHUNK_SIZE) {
+      const chunk = int16Data.subarray(j, j + CHUNK_SIZE);
+      const mp3Chunk = encoder.encodeBuffer(chunk);
+      if (mp3Chunk.length > 0) {
+        mp3Chunks.push(new Uint8Array(mp3Chunk).buffer);
+      }
     }
   }
 
