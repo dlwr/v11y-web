@@ -2,9 +2,12 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRecorder } from './hooks/useRecorder';
 import { initNoiseReducer, processAudio } from './lib/noiseReducer';
 import { floatToWav, formatDuration, downloadBlob } from './lib/audioUtils';
+import { decodeAudioFile, AUDIO_ACCEPT } from './lib/audioDecoder';
+import { floatToMp3 } from './lib/mp3Encoder';
 import './App.css';
 
 type AppState = 'home' | 'recording' | 'playback';
+type OutputFormat = 'wav' | 'mp3';
 
 // Request notification permission and send notification
 async function sendNotification(title: string, body: string): Promise<void> {
@@ -64,12 +67,17 @@ function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackTime, setPlaybackTime] = useState(0);
   const [modelLoading, setModelLoading] = useState(true);
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>('wav');
+  const [uploadedAudio, setUploadedAudio] = useState<Float32Array | null>(null);
+  const [uploadedDuration, setUploadedDuration] = useState(0);
+  const [isDecoding, setIsDecoding] = useState(false);
 
   // Keep screen awake during recording and processing
   useWakeLock(appState === 'recording' || isProcessing);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const {
     state: recordingState,
@@ -129,7 +137,8 @@ function App() {
       URL.revokeObjectURL(audioUrlRef.current);
     }
 
-    const data = useProcessed && processedAudio ? processedAudio : audioData;
+    const currentAudioData = uploadedAudio || audioData;
+    const data = useProcessed && processedAudio ? processedAudio : currentAudioData;
     if (data) {
       const blob = floatToWav(data);
       audioUrlRef.current = URL.createObjectURL(blob);
@@ -148,7 +157,7 @@ function App() {
         URL.revokeObjectURL(audioUrlRef.current);
       }
     };
-  }, [useProcessed, processedAudio, audioData]);
+  }, [useProcessed, processedAudio, audioData, uploadedAudio]);
 
   const handleStartRecording = async () => {
     // Request notification permission on first recording
@@ -196,20 +205,51 @@ function App() {
 
   const handleDownload = () => {
     const isEnhanced = useProcessed && processedAudio;
-    const data = isEnhanced ? processedAudio : audioData;
+    const currentAudioData = uploadedAudio || audioData;
+    const data = isEnhanced ? processedAudio : currentAudioData;
     if (data) {
-      const blob = floatToWav(data);
+      const blob = outputFormat === 'mp3' ? floatToMp3(data) : floatToWav(data);
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const suffix = isEnhanced ? 'enhanced' : 'original';
-      downloadBlob(blob, `recording-${timestamp}-${suffix}.wav`);
+      downloadBlob(blob, `recording-${timestamp}-${suffix}.${outputFormat}`);
     }
   };
 
   const handleNewRecording = () => {
     setAppState('home');
     setProcessedAudio(null);
+    setUploadedAudio(null);
+    setUploadedDuration(0);
     setPlaybackTime(0);
     setIsPlaying(false);
+  };
+
+  const handleFileSelect = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsDecoding(true);
+    try {
+      const { audioData, duration } = await decodeAudioFile(file);
+      setUploadedAudio(audioData);
+      setUploadedDuration(duration);
+      setAppState('playback');
+      // Process the uploaded audio
+      processRecording(audioData);
+    } catch (error) {
+      console.error('Failed to decode audio file:', error);
+      alert('Failed to decode audio file. Please try another file.');
+    } finally {
+      setIsDecoding(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -240,18 +280,76 @@ function App() {
         </div>
       )}
 
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={AUDIO_ACCEPT}
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
       {/* Home Screen */}
       {appState === 'home' && (
         <div className="flex flex-col items-center">
           <button
             onClick={handleStartRecording}
-            className="w-24 h-24 rounded-full bg-red-500 hover:bg-red-600 transition-colors flex items-center justify-center shadow-lg"
+            disabled={isDecoding}
+            className="w-24 h-24 rounded-full bg-red-500 hover:bg-red-600 transition-colors flex items-center justify-center shadow-lg disabled:opacity-50"
           >
             <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="8" />
             </svg>
           </button>
           <p className="mt-4 text-gray-400">Tap to record</p>
+
+          {/* Divider */}
+          <div className="flex items-center gap-4 my-6 w-full max-w-xs">
+            <div className="flex-1 h-px bg-gray-600" />
+            <span className="text-gray-500 text-sm">or</span>
+            <div className="flex-1 h-px bg-gray-600" />
+          </div>
+
+          {/* Upload button */}
+          <button
+            onClick={handleFileSelect}
+            disabled={isDecoding}
+            className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50"
+          >
+            {isDecoding ? (
+              <>
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                <span>Decoding...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                  />
+                </svg>
+                <span>Upload Audio File</span>
+              </>
+            )}
+          </button>
+          <p className="mt-2 text-gray-500 text-xs">MP3, WAV, M4A</p>
         </div>
       )}
 
@@ -363,14 +461,14 @@ function App() {
 
           {/* Playback time */}
           <p className="text-4xl font-mono mb-4">
-            {formatDuration(playbackTime)} / {formatDuration(duration)}
+            {formatDuration(playbackTime)} / {formatDuration(uploadedDuration || duration)}
           </p>
 
           {/* Seek bar */}
           <input
             type="range"
             min={0}
-            max={duration || 1}
+            max={(uploadedDuration || duration) || 1}
             step={0.1}
             value={playbackTime}
             onChange={handleSeek}
@@ -396,6 +494,27 @@ function App() {
             </button>
           </div>
 
+          {/* Output format */}
+          <div className="flex items-center gap-2 mb-6">
+            <span className="text-gray-400 text-sm mr-2">Format:</span>
+            <button
+              onClick={() => setOutputFormat('wav')}
+              className={`px-3 py-1 rounded text-sm transition-colors ${
+                outputFormat === 'wav' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+            >
+              WAV
+            </button>
+            <button
+              onClick={() => setOutputFormat('mp3')}
+              className={`px-3 py-1 rounded text-sm transition-colors ${
+                outputFormat === 'mp3' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+            >
+              MP3
+            </button>
+          </div>
+
           {/* Actions */}
           <div className="flex items-center gap-4">
             <button
@@ -410,14 +529,14 @@ function App() {
                   d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                 />
               </svg>
-              Download
+              Download {outputFormat.toUpperCase()}
             </button>
 
             <button
               onClick={handleNewRecording}
               className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg"
             >
-              New Recording
+              New
             </button>
           </div>
         </div>
