@@ -191,14 +191,14 @@ function App() {
 
   // Update audio URL when source changes
   useEffect(() => {
-    if (audioUrlRef.current) {
-      URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = null;
-    }
-
     const currentAudioData = uploadedAudio || audioData;
     const data = useProcessed && processedAudio ? processedAudio : currentAudioData;
     if (!data) return;
+
+    // Revoke previous URL before creating new one
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+    }
 
     const blob = floatToWav(data);
     audioUrlRef.current = URL.createObjectURL(blob);
