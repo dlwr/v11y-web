@@ -24,7 +24,15 @@ export async function initNoiseReducer(): Promise<void> {
       }
     };
 
+    const handleError = (e: ErrorEvent) => {
+      worker?.removeEventListener('message', handleMessage);
+      worker?.removeEventListener('error', handleError);
+      console.error('Worker error:', e);
+      reject(new Error(e.message || 'Worker initialization failed'));
+    };
+
     worker.addEventListener('message', handleMessage);
+    worker.addEventListener('error', handleError);
     worker.postMessage({ type: 'init' });
   });
 
