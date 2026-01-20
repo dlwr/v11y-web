@@ -73,8 +73,8 @@ function App() {
   const [isDecoding, setIsDecoding] = useState(false);
   const [isEncoding, setIsEncoding] = useState(false);
 
-  // Keep screen awake during recording and processing
-  useWakeLock(appState === 'recording' || isProcessing);
+  // Keep screen awake during recording, processing, and playback
+  useWakeLock(appState === 'recording' || appState === 'playback' || isProcessing);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioUrlRef = useRef<string | null>(null);
