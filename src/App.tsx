@@ -335,7 +335,8 @@ function App() {
 
       {/* Header */}
       <h1 className="text-3xl font-bold mb-2">v11y</h1>
-      <p className="text-gray-400 mb-8 text-sm">AI Noise Reduction Recorder</p>
+      <p className="text-gray-400 mb-1 text-sm">AI Noise Reduction Recorder</p>
+      <p className="text-gray-600 mb-8 text-xs">v{__APP_VERSION__}</p>
 
       {modelLoading && (
         <div className="fixed top-4 right-4 bg-blue-600 px-4 py-2 rounded-lg text-sm">
