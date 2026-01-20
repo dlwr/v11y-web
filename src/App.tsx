@@ -4,6 +4,12 @@ import { initNoiseReducer, processAudio } from './lib/noiseReducer';
 import { floatToWav, formatDuration, downloadBlob } from './lib/audioUtils';
 import { decodeAudioFile, AUDIO_ACCEPT } from './lib/audioDecoder';
 import { floatToMp3 } from './lib/mp3Encoder';
+import {
+  saveAudioState,
+  loadAudioState,
+  clearAudioState,
+  isStateValid,
+} from './lib/audioPersistence';
 import './App.css';
 
 type AppState = 'home' | 'recording' | 'playback';
@@ -73,8 +79,8 @@ function App() {
   const [isDecoding, setIsDecoding] = useState(false);
   const [isEncoding, setIsEncoding] = useState(false);
 
-  // Keep screen awake during recording, processing, and playback
-  useWakeLock(appState === 'recording' || appState === 'playback' || isProcessing);
+  // Keep screen awake during recording and processing (not playback - we persist state now)
+  useWakeLock(appState === 'recording' || isProcessing);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioUrlRef = useRef<string | null>(null);
@@ -91,21 +97,46 @@ function App() {
     resumeRecording,
   } = useRecorder();
 
-  // Preload model
+  // Preload model and restore saved state
   useEffect(() => {
-    initNoiseReducer()
-      .then(() => setModelLoading(false))
-      .catch((err) => {
+    const init = async () => {
+      // Try to restore saved state first
+      try {
+        const savedState = await loadAudioState();
+        if (savedState && isStateValid(savedState)) {
+          setUploadedAudio(savedState.originalAudio);
+          setUploadedDuration(savedState.duration);
+          setProcessedAudio(savedState.processedAudio);
+          setAppState('playback');
+        }
+      } catch (err) {
+        console.warn('Failed to restore audio state:', err);
+      }
+
+      // Load AI model
+      try {
+        await initNoiseReducer();
+        setModelLoading(false);
+      } catch (err) {
         console.error('Failed to load model:', err);
         setModelLoading(false);
-      });
+      }
+    };
+    init();
   }, []);
 
-  const processRecording = useCallback(async (data: Float32Array) => {
+  const processRecording = useCallback(async (data: Float32Array, audioDuration: number) => {
     setIsProcessing(true);
     try {
       const processed = await processAudio(data);
       setProcessedAudio(processed);
+      // Save state to IndexedDB for persistence across sleep/refresh
+      await saveAudioState({
+        originalAudio: data,
+        processedAudio: processed,
+        duration: audioDuration,
+        timestamp: Date.now(),
+      });
       // Send notification when processing is complete (useful when app is in background)
       if (document.hidden) {
         sendNotification('v11y', 'AI noise reduction complete! Your recording is ready.');
@@ -113,6 +144,13 @@ function App() {
     } catch (error) {
       console.error('Failed to process audio:', error);
       setProcessedAudio(null);
+      // Still save original audio even if processing fails
+      await saveAudioState({
+        originalAudio: data,
+        processedAudio: null,
+        duration: audioDuration,
+        timestamp: Date.now(),
+      });
       if (document.hidden) {
         sendNotification('v11y', 'Processing failed. Please try again.');
       }
@@ -127,10 +165,10 @@ function App() {
       prevAudioDataRef.current = audioData;
       // Use queueMicrotask to avoid synchronous setState in effect
       queueMicrotask(() => {
-        processRecording(audioData);
+        processRecording(audioData, duration);
       });
     }
-  }, [audioData, processRecording]);
+  }, [audioData, duration, processRecording]);
 
   // Update audio URL when source changes
   useEffect(() => {
@@ -233,6 +271,8 @@ function App() {
     setUploadedDuration(0);
     setPlaybackTime(0);
     setIsPlaying(false);
+    // Clear persisted state
+    clearAudioState();
   };
 
   const handleFileSelect = () => {
@@ -245,12 +285,12 @@ function App() {
 
     setIsDecoding(true);
     try {
-      const { audioData, duration } = await decodeAudioFile(file);
-      setUploadedAudio(audioData);
-      setUploadedDuration(duration);
+      const { audioData: decodedAudio, duration: decodedDuration } = await decodeAudioFile(file);
+      setUploadedAudio(decodedAudio);
+      setUploadedDuration(decodedDuration);
       setAppState('playback');
       // Process the uploaded audio
-      processRecording(audioData);
+      processRecording(decodedAudio, decodedDuration);
     } catch (error) {
       console.error('Failed to decode audio file:', error);
       alert('Failed to decode audio file. Please try another file.');
