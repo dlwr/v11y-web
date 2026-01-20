@@ -185,33 +185,37 @@ function App() {
   useEffect(() => {
     if (audioData && audioData !== prevAudioDataRef.current && audioData.length > 0) {
       prevAudioDataRef.current = audioData;
-      processRecording(audioData, duration);
+      // Use queueMicrotask to avoid synchronous setState in effect
+      queueMicrotask(() => {
+        processRecording(audioData, duration);
+      });
     }
   }, [audioData, duration, processRecording]);
 
   // Update audio URL when source changes
   useEffect(() => {
-    const currentAudioData = uploadedAudio || audioData;
-    const data = useProcessed && processedAudio ? processedAudio : currentAudioData;
-    if (!data) return;
-
-    // Revoke previous URL before creating new one
     if (audioUrlRef.current) {
       URL.revokeObjectURL(audioUrlRef.current);
     }
 
-    const blob = floatToWav(data);
-    audioUrlRef.current = URL.createObjectURL(blob);
-    if (audioRef.current) {
-      audioRef.current.src = audioUrlRef.current;
+    const currentAudioData = uploadedAudio || audioData;
+    const data = useProcessed && processedAudio ? processedAudio : currentAudioData;
+    if (data) {
+      const blob = floatToWav(data);
+      audioUrlRef.current = URL.createObjectURL(blob);
+      if (audioRef.current) {
+        audioRef.current.src = audioUrlRef.current;
+        // Reset playback state when source changes (use queueMicrotask to avoid setState in effect)
+        queueMicrotask(() => {
+          setIsPlaying(false);
+          setPlaybackTime(0);
+        });
+      }
     }
-    setIsPlaying(false);
-    setPlaybackTime(0);
 
     return () => {
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current);
-        audioUrlRef.current = null;
       }
     };
   }, [useProcessed, processedAudio, audioData, uploadedAudio]);
@@ -227,7 +231,11 @@ function App() {
 
   const handleStopRecording = () => {
     stopRecording();
-    setAppState('playback');
+    // State will transition to playback and start processing
+    // We need to wait for audioData to be available
+    setTimeout(() => {
+      setAppState('playback');
+    }, 0);
   };
 
   const handlePlayPause = () => {
