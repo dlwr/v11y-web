@@ -2,6 +2,7 @@ const DB_NAME = 'v11y-audio-db';
 const DB_VERSION = 1;
 const STORE_NAME = 'audio-state';
 const STATE_KEY = 'current-session';
+const MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export interface PersistedAudioState {
   originalAudio: Float32Array;
@@ -10,13 +11,25 @@ export interface PersistedAudioState {
   timestamp: number;
 }
 
+interface SerializedAudioState {
+  originalAudio: number[];
+  processedAudio: number[] | null;
+  duration: number;
+  timestamp: number;
+}
+
+let dbInstance: IDBDatabase | null = null;
+
 function openDB(): Promise<IDBDatabase> {
+  if (dbInstance) return Promise.resolve(dbInstance);
+
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
-
+    request.onsuccess = () => {
+      dbInstance = request.result;
+      resolve(dbInstance);
+    };
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -26,52 +39,50 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-export async function saveAudioState(state: PersistedAudioState): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
+function withStore<T>(
+  mode: IDBTransactionMode,
+  callback: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
+  return openDB().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const transaction = db.transaction(STORE_NAME, mode);
+        const store = transaction.objectStore(STORE_NAME);
+        const request = callback(store);
+        transaction.oncomplete = () => resolve(request.result);
+        transaction.onerror = () => reject(transaction.error);
+      }),
+  );
+}
 
-    // Convert Float32Arrays to regular arrays for storage
-    const serializable = {
-      originalAudio: Array.from(state.originalAudio),
-      processedAudio: state.processedAudio ? Array.from(state.processedAudio) : null,
-      duration: state.duration,
-      timestamp: state.timestamp,
-    };
+function serialize(state: PersistedAudioState): SerializedAudioState {
+  return {
+    originalAudio: Array.from(state.originalAudio),
+    processedAudio: state.processedAudio ? Array.from(state.processedAudio) : null,
+    duration: state.duration,
+    timestamp: state.timestamp,
+  };
+}
 
-    const request = store.put(serializable, STATE_KEY);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
-  });
+function deserialize(data: SerializedAudioState): PersistedAudioState {
+  return {
+    originalAudio: new Float32Array(data.originalAudio),
+    processedAudio: data.processedAudio ? new Float32Array(data.processedAudio) : null,
+    duration: data.duration,
+    timestamp: data.timestamp,
+  };
+}
+
+export function saveAudioState(state: PersistedAudioState): Promise<void> {
+  return withStore('readwrite', (store) => store.put(serialize(state), STATE_KEY)).then(() => {});
 }
 
 export async function loadAudioState(): Promise<PersistedAudioState | null> {
   try {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readonly');
-      const store = transaction.objectStore(STORE_NAME);
-      const request = store.get(STATE_KEY);
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const data = request.result;
-        if (!data) {
-          resolve(null);
-          return;
-        }
-
-        // Convert arrays back to Float32Arrays
-        const state: PersistedAudioState = {
-          originalAudio: new Float32Array(data.originalAudio),
-          processedAudio: data.processedAudio ? new Float32Array(data.processedAudio) : null,
-          duration: data.duration,
-          timestamp: data.timestamp,
-        };
-        resolve(state);
-      };
-    });
+    const data = await withStore<SerializedAudioState | undefined>('readonly', (store) =>
+      store.get(STATE_KEY),
+    );
+    return data ? deserialize(data) : null;
   } catch {
     return null;
   }
@@ -79,21 +90,12 @@ export async function loadAudioState(): Promise<PersistedAudioState | null> {
 
 export async function clearAudioState(): Promise<void> {
   try {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readwrite');
-      const store = transaction.objectStore(STORE_NAME);
-      const request = store.delete(STATE_KEY);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
-    });
+    await withStore('readwrite', (store) => store.delete(STATE_KEY));
   } catch {
     // Ignore errors when clearing
   }
 }
 
-// Check if saved state is still valid (within 24 hours)
 export function isStateValid(state: PersistedAudioState): boolean {
-  const MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
-  return Date.now() - state.timestamp < MAX_AGE;
+  return Date.now() - state.timestamp < MAX_AGE_MS;
 }

@@ -183,10 +183,7 @@ function App() {
   useEffect(() => {
     if (audioData && audioData !== prevAudioDataRef.current && audioData.length > 0) {
       prevAudioDataRef.current = audioData;
-      // Use queueMicrotask to avoid synchronous setState in effect
-      queueMicrotask(() => {
-        processRecording(audioData, duration);
-      });
+      processRecording(audioData, duration);
     }
   }, [audioData, duration, processRecording]);
 
@@ -194,26 +191,25 @@ function App() {
   useEffect(() => {
     if (audioUrlRef.current) {
       URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
     }
 
     const currentAudioData = uploadedAudio || audioData;
     const data = useProcessed && processedAudio ? processedAudio : currentAudioData;
-    if (data) {
-      const blob = floatToWav(data);
-      audioUrlRef.current = URL.createObjectURL(blob);
-      if (audioRef.current) {
-        audioRef.current.src = audioUrlRef.current;
-        // Reset playback state when source changes (use queueMicrotask to avoid setState in effect)
-        queueMicrotask(() => {
-          setIsPlaying(false);
-          setPlaybackTime(0);
-        });
-      }
+    if (!data) return;
+
+    const blob = floatToWav(data);
+    audioUrlRef.current = URL.createObjectURL(blob);
+    if (audioRef.current) {
+      audioRef.current.src = audioUrlRef.current;
     }
+    setIsPlaying(false);
+    setPlaybackTime(0);
 
     return () => {
       if (audioUrlRef.current) {
         URL.revokeObjectURL(audioUrlRef.current);
+        audioUrlRef.current = null;
       }
     };
   }, [useProcessed, processedAudio, audioData, uploadedAudio]);
@@ -229,11 +225,7 @@ function App() {
 
   const handleStopRecording = () => {
     stopRecording();
-    // State will transition to playback and start processing
-    // We need to wait for audioData to be available
-    setTimeout(() => {
-      setAppState('playback');
-    }, 0);
+    setAppState('playback');
   };
 
   const handlePlayPause = () => {
