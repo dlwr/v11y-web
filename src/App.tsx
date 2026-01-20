@@ -97,6 +97,9 @@ function App() {
     resumeRecording,
   } = useRecorder();
 
+  // Track restored state for re-processing
+  const restoredStateRef = useRef<{ audio: Float32Array; duration: number } | null>(null);
+
   // Preload model and restore saved state
   useEffect(() => {
     const init = async () => {
@@ -108,6 +111,13 @@ function App() {
           setUploadedDuration(savedState.duration);
           setProcessedAudio(savedState.processedAudio);
           setAppState('playback');
+          // If processing was interrupted (no processed audio), queue for re-processing
+          if (!savedState.processedAudio) {
+            restoredStateRef.current = {
+              audio: savedState.originalAudio,
+              duration: savedState.duration,
+            };
+          }
         }
       } catch (err) {
         console.warn('Failed to restore audio state:', err);
@@ -127,10 +137,18 @@ function App() {
 
   const processRecording = useCallback(async (data: Float32Array, audioDuration: number) => {
     setIsProcessing(true);
+    // Save original audio immediately before processing starts
+    // This way if the app sleeps during processing, we can restore and retry
+    await saveAudioState({
+      originalAudio: data,
+      processedAudio: null,
+      duration: audioDuration,
+      timestamp: Date.now(),
+    });
     try {
       const processed = await processAudio(data);
       setProcessedAudio(processed);
-      // Save state to IndexedDB for persistence across sleep/refresh
+      // Update with processed audio
       await saveAudioState({
         originalAudio: data,
         processedAudio: processed,
@@ -144,19 +162,21 @@ function App() {
     } catch (error) {
       console.error('Failed to process audio:', error);
       setProcessedAudio(null);
-      // Still save original audio even if processing fails
-      await saveAudioState({
-        originalAudio: data,
-        processedAudio: null,
-        duration: audioDuration,
-        timestamp: Date.now(),
-      });
       if (document.hidden) {
         sendNotification('v11y', 'Processing failed. Please try again.');
       }
     }
     setIsProcessing(false);
   }, []);
+
+  // Re-process restored audio once model is loaded
+  useEffect(() => {
+    if (!modelLoading && restoredStateRef.current) {
+      const { audio, duration: audioDuration } = restoredStateRef.current;
+      restoredStateRef.current = null;
+      processRecording(audio, audioDuration);
+    }
+  }, [modelLoading, processRecording]);
 
   // Process audio when new audioData becomes available
   const prevAudioDataRef = useRef<Float32Array | null>(null);
