@@ -1,15 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+
 import { useRecorder } from './hooks/useRecorder';
-import { initNoiseReducer, processAudio } from './lib/noiseReducer';
-import { floatToWav, formatDuration, downloadBlob } from './lib/audioUtils';
 import { decodeAudioFile, AUDIO_ACCEPT } from './lib/audioDecoder';
-import { floatToMp3 } from './lib/mp3Encoder';
 import {
   saveAudioState,
   loadAudioState,
   clearAudioState,
   isStateValid,
 } from './lib/audioPersistence';
+import { floatToWav, formatDuration, downloadBlob } from './lib/audioUtils';
+import { floatToMp3 } from './lib/mp3Encoder';
+import { initNoiseReducer, processAudio } from './lib/noiseReducer';
 import './App.css';
 
 type AppState = 'home' | 'recording' | 'playback';
@@ -33,8 +34,8 @@ async function sendNotification(title: string, body: string): Promise<void> {
   }
 }
 
-// Keep screen awake during recording
-function useWakeLock(enabled: boolean) {
+// Keep screen awake during long-running operations
+function useWakeLock(enabled: boolean): void {
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
 
   useEffect(() => {
@@ -80,7 +81,8 @@ function App() {
   const [isEncoding, setIsEncoding] = useState(false);
 
   // Keep screen awake during recording and any processing
-  useWakeLock(appState === 'recording' || isProcessing || isDecoding || isEncoding);
+  const shouldKeepAwake = appState === 'recording' || isProcessing || isDecoding || isEncoding;
+  useWakeLock(shouldKeepAwake);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioUrlRef = useRef<string | null>(null);
