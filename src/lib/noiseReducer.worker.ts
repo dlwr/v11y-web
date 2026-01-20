@@ -6,10 +6,54 @@ const FFT_SIZE = 1024;
 const NUM_BINS = FFT_SIZE / 2 + 1; // 513
 const FRAME_SIZE = 960; // 20ms at 48kHz
 const HOP_SIZE = 480; // 10ms, 50% overlap
-const MIN_MASK = 0.15; // Minimum mask floor to preserve voice naturalness
+const TARGET_LUFS = -16; // Podcast standard loudness
 
-// Target loudness for podcast: -16 LUFS
-const TARGET_LUFS = -16;
+// SNR thresholds for dynamic MIN_MASK calculation (in dB)
+const SNR_VERY_HIGH = 35;
+const SNR_HIGH = 25;
+const SNR_MEDIUM = 15;
+
+// MIN_MASK values: higher = more conservative (preserves more signal)
+const MIN_MASK_VERY_HIGH_SNR = 0.12; // Aggressive noise reduction
+const MIN_MASK_HIGH_SNR = 0.18; // Balanced
+const MIN_MASK_MEDIUM_SNR = 0.25; // Conservative
+const MIN_MASK_LOW_SNR = 0.30; // Preserve quiet speech
+const MIN_MASK_DEFAULT = 0.20; // Fallback for very short audio
+
+/**
+ * Calculate dynamic MIN_MASK based on estimated SNR.
+ * Higher MIN_MASK in low SNR environments preserves quiet speech.
+ */
+function calculateDynamicMinMask(audioData: Float32Array): number {
+  const numFrames = Math.floor(audioData.length / FRAME_SIZE);
+
+  if (numFrames < 2) {
+    return MIN_MASK_DEFAULT;
+  }
+
+  // Calculate RMS for each frame
+  const frameRms: number[] = [];
+  for (let f = 0; f < numFrames; f++) {
+    let sum = 0;
+    for (let i = 0; i < FRAME_SIZE; i++) {
+      const sample = audioData[f * FRAME_SIZE + i] || 0;
+      sum += sample * sample;
+    }
+    frameRms.push(Math.sqrt(sum / FRAME_SIZE));
+  }
+
+  // Estimate SNR from percentile difference
+  frameRms.sort((a, b) => a - b);
+  const p10 = frameRms[Math.floor(numFrames * 0.1)] || 1e-10;
+  const p90 = frameRms[Math.floor(numFrames * 0.9)] || 1e-5;
+  const snrDb = 20 * Math.log10((p90 + 1e-10) / (p10 + 1e-10));
+
+  // Return MIN_MASK based on SNR level
+  if (snrDb > SNR_VERY_HIGH) return MIN_MASK_VERY_HIGH_SNR;
+  if (snrDb > SNR_HIGH) return MIN_MASK_HIGH_SNR;
+  if (snrDb > SNR_MEDIUM) return MIN_MASK_MEDIUM_SNR;
+  return MIN_MASK_LOW_SNR;
+}
 
 let ortSession: ort.InferenceSession | null = null;
 
@@ -85,6 +129,9 @@ async function processAudio(audioData: Float32Array): Promise<Float32Array> {
   const results = await ortSession.run({ input: inputTensor });
   const outputData = results['output'].data as Float32Array;
 
+  // Calculate dynamic MIN_MASK based on audio SNR
+  const minMask = calculateDynamicMinMask(audioData);
+
   // Reconstruct audio with mask applied
   const outputAudio = new Float32Array(paddedLength);
   const outputWindow = new Float32Array(paddedLength);
@@ -95,7 +142,7 @@ async function processAudio(audioData: Float32Array): Promise<Float32Array> {
 
     for (let k = 0; k < NUM_BINS; k++) {
       const mask = outputData[frameIdx * NUM_BINS + k];
-      const clampedMask = Math.max(MIN_MASK, Math.min(1, mask));
+      const clampedMask = Math.max(minMask, Math.min(1, mask));
       const enhancedMag = magnitudes[frameIdx][k] * clampedMask;
       const phase = phases[frameIdx][k];
 
