@@ -48,18 +48,43 @@ export async function processAudio(audioData: Float32Array): Promise<Float32Arra
     throw new Error('Failed to initialize NoiseReducer Worker');
   }
 
+  const TIMEOUT_MS = 10 * 60 * 1000; // 10分タイムアウト
+
   return new Promise((resolve, reject) => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      worker?.removeEventListener('message', handleMessage);
+      worker?.removeEventListener('error', handleError);
+    };
+
     const handleMessage = (e: MessageEvent) => {
       if (e.data.type === 'process-complete') {
-        worker?.removeEventListener('message', handleMessage);
+        cleanup();
         resolve(e.data.audioData);
       } else if (e.data.type === 'error') {
-        worker?.removeEventListener('message', handleMessage);
+        cleanup();
         reject(new Error(e.data.error));
       }
     };
 
+    const handleError = (e: ErrorEvent) => {
+      cleanup();
+      reject(new Error(e.message || 'Worker processing failed'));
+    };
+
+    timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Processing timeout after ${TIMEOUT_MS / 1000}s`));
+    }, TIMEOUT_MS);
+
     worker!.addEventListener('message', handleMessage);
+    worker!.addEventListener('error', handleError);
+
     // Transfer the buffer for better performance
     const audioDataCopy = new Float32Array(audioData);
     worker!.postMessage({ type: 'process', audioData: audioDataCopy }, [audioDataCopy.buffer]);

@@ -395,3 +395,16 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
     self.postMessage({ type: 'error', error: String(error) });
   }
 };
+
+// Global error handler for uncaught errors
+self.onerror = (event: string | Event) => {
+  const message =
+    typeof event === 'string' ? event : (event as ErrorEvent).message || 'Unknown worker error';
+  self.postMessage({ type: 'error', error: `Worker error: ${message}` });
+};
+
+// Global handler for unhandled promise rejections
+self.onunhandledrejection = (event) => {
+  const reason = event.reason instanceof Error ? event.reason.message : String(event.reason);
+  self.postMessage({ type: 'error', error: `Unhandled rejection: ${reason}` });
+};
