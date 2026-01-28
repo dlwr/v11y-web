@@ -21,8 +21,7 @@ class MockWorker {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  postMessage(data: unknown, transfer?: Transferable[]) {
+  postMessage(_data: unknown, _transfer?: Transferable[]) {
     // Mock implementation - 何もしない
   }
 
@@ -52,8 +51,7 @@ class MockWorker {
 let mockWorkerInstance: MockWorker | null = null;
 
 class WorkerMock extends MockWorker {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  constructor(url: URL | string, options?: WorkerOptions) {
+  constructor(_url: URL | string, _options?: WorkerOptions) {
     super();
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     mockWorkerInstance = this;
