@@ -101,6 +101,8 @@ function App() {
 
   // Track restored state for re-processing
   const restoredStateRef = useRef<{ audio: Float32Array; duration: number } | null>(null);
+  // Track processing state for avoiding duplicate processing
+  const isProcessingRef = useRef(false);
 
   // Preload model and restore saved state
   useEffect(() => {
@@ -138,6 +140,12 @@ function App() {
   }, []);
 
   const processRecording = useCallback(async (data: Float32Array, audioDuration: number) => {
+    // Prevent duplicate processing
+    if (isProcessingRef.current) {
+      console.warn('processRecording called while already processing, ignoring');
+      return;
+    }
+    isProcessingRef.current = true;
     setIsProcessing(true);
     // Save original audio immediately before processing starts
     // This way if the app sleeps during processing, we can restore and retry
@@ -168,6 +176,7 @@ function App() {
         sendNotification('v11y', 'Processing failed. Please try again.');
       }
     }
+    isProcessingRef.current = false;
     setIsProcessing(false);
   }, []);
 

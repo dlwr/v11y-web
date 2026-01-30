@@ -1,6 +1,7 @@
 // Web Worker wrapper for noise reduction
 let worker: Worker | null = null;
 let initPromise: Promise<void> | null = null;
+let processingPromise: Promise<Float32Array> | null = null;
 
 export async function initNoiseReducer(): Promise<void> {
   if (worker) return;
@@ -40,6 +41,11 @@ export async function initNoiseReducer(): Promise<void> {
 }
 
 export async function processAudio(audioData: Float32Array): Promise<Float32Array> {
+  // 既に処理中の場合はエラーを投げる（呼び出し元で排他制御すべき）
+  if (processingPromise) {
+    throw new Error('processAudio called while already processing');
+  }
+
   if (!worker) {
     await initNoiseReducer();
   }
@@ -50,7 +56,7 @@ export async function processAudio(audioData: Float32Array): Promise<Float32Arra
 
   const TIMEOUT_MS = 10 * 60 * 1000; // 10分タイムアウト
 
-  return new Promise((resolve, reject) => {
+  processingPromise = new Promise((resolve, reject) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const cleanup = () => {
@@ -88,6 +94,10 @@ export async function processAudio(audioData: Float32Array): Promise<Float32Arra
     // Transfer the buffer for better performance
     const audioDataCopy = new Float32Array(audioData);
     worker!.postMessage({ type: 'process', audioData: audioDataCopy }, [audioDataCopy.buffer]);
+  });
+
+  return processingPromise.finally(() => {
+    processingPromise = null;
   });
 }
 
