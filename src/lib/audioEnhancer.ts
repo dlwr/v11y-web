@@ -514,11 +514,11 @@ function applyLowPassFilter(input: Float32Array, cutoff: number): Float32Array {
 // ============================================
 function applyCompressor(
   audio: Float32Array,
-  threshold: number = -20, // dB
-  ratio: number = 4,
+  threshold: number = -18, // dB - raised for gentler compression
+  ratio: number = 3, // reduced from 4 for more natural dynamics
   attack: number = 5, // ms
   release: number = 100, // ms
-  makeupGain: number = 6 // dB
+  makeupGain: number = 4 // dB - reduced to prevent over-amplification
 ): Float32Array {
   const output = new Float32Array(audio.length);
   const attackSamples = Math.floor((attack / 1000) * SAMPLE_RATE);
