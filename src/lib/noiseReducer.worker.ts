@@ -383,15 +383,21 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
   const { type } = e.data;
 
   try {
+    console.log('[Worker] Received message:', type);
     if (type === 'init') {
       await initNoiseReducer();
       self.postMessage({ type: 'init-complete' });
     } else if (type === 'process') {
       const { audioData } = e.data as ProcessMessage;
+      console.log('[Worker] Starting processAudio, audioData length:', audioData?.length);
+      const startTime = Date.now();
       const result = await processAudio(audioData);
+      console.log('[Worker] processAudio completed in', (Date.now() - startTime) / 1000, 'seconds, result length:', result?.length);
       self.postMessage({ type: 'process-complete', audioData: result }, { transfer: [result.buffer] });
+      console.log('[Worker] process-complete message sent');
     }
   } catch (error) {
+    console.error('[Worker] Error:', error);
     self.postMessage({ type: 'error', error: String(error) });
   }
 };

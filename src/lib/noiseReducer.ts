@@ -54,7 +54,7 @@ export async function processAudio(audioData: Float32Array): Promise<Float32Arra
     throw new Error('Failed to initialize NoiseReducer Worker');
   }
 
-  const TIMEOUT_MS = 10 * 60 * 1000; // 10分タイムアウト
+  const TIMEOUT_MS = 30 * 60 * 1000; // 30分タイムアウト
 
   processingPromise = new Promise((resolve, reject) => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
