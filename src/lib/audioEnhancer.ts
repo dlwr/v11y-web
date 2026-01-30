@@ -421,17 +421,17 @@ function applyBreathReducer(
 
 // ============================================
 // De-Esser - Reduce harsh sibilance (s, sh sounds)
-// Aggressive settings for strong friction sound reduction
+// Balanced settings to preserve natural high frequencies
 // ============================================
 function applyDeEsser(
   audio: Float32Array,
-  threshold: number = -30, // dB - lower threshold = trigger earlier (was -25)
-  reduction: number = 15 // dB - stronger max reduction (was 8)
+  threshold: number = -20, // dB - raised to avoid triggering on normal speech
+  reduction: number = 8 // dB - reduced for more natural sound
 ): Float32Array {
   const output = new Float32Array(audio.length);
 
-  // Wider bandpass filter to detect sibilance (3-12 kHz range for more coverage)
-  const detected = applyBandpassFilter(audio, 3000, 12000);
+  // Narrower bandpass filter to target sibilance more precisely (4-10 kHz)
+  const detected = applyBandpassFilter(audio, 4000, 10000);
 
   const thresholdLinear = Math.pow(10, threshold / 20);
   const maxReduction = Math.pow(10, -reduction / 20);
@@ -453,17 +453,17 @@ function applyDeEsser(
     // Calculate gain reduction based on sibilance level
     let gain = 1;
     if (envelope > thresholdLinear) {
-      // More aggressive ratio (0.85 instead of 0.7) for harder compression
+      // Gentler ratio (0.6) for more natural compression
       const overDb = 20 * Math.log10(envelope / thresholdLinear);
-      const reductionDb = Math.min(overDb * 0.85, reduction);
+      const reductionDb = Math.min(overDb * 0.6, reduction);
       gain = Math.pow(10, -reductionDb / 20);
       gain = Math.max(gain, maxReduction);
     }
 
-    // Apply reduction more aggressively to sibilance content
+    // Apply reduction to sibilance content with natural multiplier
     const sibilanceRatio = Math.min(1, Math.abs(detected[i]) / (Math.abs(audio[i]) + 1e-10));
-    // Increase the effect multiplier (1.3x) for more noticeable reduction
-    const effectiveGain = 1 - Math.min(1, sibilanceRatio * 1.3) * (1 - gain);
+    // Use 1.0x multiplier for more natural sound
+    const effectiveGain = 1 - Math.min(1, sibilanceRatio * 1.0) * (1 - gain);
     output[i] = audio[i] * effectiveGain;
   }
 
