@@ -69,10 +69,13 @@ export async function processAudio(audioData: Float32Array): Promise<Float32Arra
     };
 
     const handleMessage = (e: MessageEvent) => {
+      console.log('[noiseReducer] Worker message received:', e.data.type);
       if (e.data.type === 'process-complete') {
+        console.log('[noiseReducer] process-complete, audioData length:', e.data.audioData?.length);
         cleanup();
         resolve(e.data.audioData);
       } else if (e.data.type === 'error') {
+        console.error('[noiseReducer] Worker returned error:', e.data.error);
         cleanup();
         reject(new Error(e.data.error));
       }
@@ -93,6 +96,7 @@ export async function processAudio(audioData: Float32Array): Promise<Float32Arra
 
     // Transfer the buffer for better performance
     const audioDataCopy = new Float32Array(audioData);
+    console.log('[noiseReducer] Posting process message to worker, audioData length:', audioDataCopy.length);
     worker!.postMessage({ type: 'process', audioData: audioDataCopy }, [audioDataCopy.buffer]);
   });
 

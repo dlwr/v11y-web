@@ -11,9 +11,11 @@ export interface PersistedAudioState {
   timestamp: number;
 }
 
+// IndexedDBはFloat32Arrayを直接保存できるが、
+// structured cloneのためにArrayBufferとして保存する
 interface SerializedAudioState {
-  originalAudio: number[];
-  processedAudio: number[] | null;
+  originalAudio: ArrayBuffer;
+  processedAudio: ArrayBuffer | null;
   duration: number;
   timestamp: number;
 }
@@ -56,9 +58,19 @@ function withStore<T>(
 }
 
 function serialize(state: PersistedAudioState): SerializedAudioState {
+  // Float32Arrayのbufferを新しいArrayBufferにコピー
+  const originalBuffer = new ArrayBuffer(state.originalAudio.byteLength);
+  new Float32Array(originalBuffer).set(state.originalAudio);
+
+  let processedBuffer: ArrayBuffer | null = null;
+  if (state.processedAudio) {
+    processedBuffer = new ArrayBuffer(state.processedAudio.byteLength);
+    new Float32Array(processedBuffer).set(state.processedAudio);
+  }
+
   return {
-    originalAudio: Array.from(state.originalAudio),
-    processedAudio: state.processedAudio ? Array.from(state.processedAudio) : null,
+    originalAudio: originalBuffer,
+    processedAudio: processedBuffer,
     duration: state.duration,
     timestamp: state.timestamp,
   };

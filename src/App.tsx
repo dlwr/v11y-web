@@ -147,30 +147,37 @@ function App() {
     }
     isProcessingRef.current = true;
     setIsProcessing(true);
-    // Save original audio immediately before processing starts
+    // Save original audio immediately before processing starts (non-blocking)
     // This way if the app sleeps during processing, we can restore and retry
-    await saveAudioState({
+    saveAudioState({
       originalAudio: data,
       processedAudio: null,
       duration: audioDuration,
       timestamp: Date.now(),
+    }).catch((err) => {
+      console.warn('[processRecording] Failed to save initial audio state (non-critical):', err);
     });
     try {
+      console.log('[processRecording] Starting processAudio, data length:', data.length);
       const processed = await processAudio(data);
+      console.log('[processRecording] processAudio completed, result length:', processed?.length);
       setProcessedAudio(processed);
-      // Update with processed audio
-      await saveAudioState({
+      console.log('[processRecording] setProcessedAudio called');
+      // Update with processed audio (non-blocking, ignore errors)
+      saveAudioState({
         originalAudio: data,
         processedAudio: processed,
         duration: audioDuration,
         timestamp: Date.now(),
+      }).catch((err) => {
+        console.warn('[processRecording] Failed to save audio state (non-critical):', err);
       });
       // Send notification when processing is complete (useful when app is in background)
       if (document.hidden) {
         sendNotification('v11y', 'AI noise reduction complete! Your recording is ready.');
       }
     } catch (error) {
-      console.error('Failed to process audio:', error);
+      console.error('[processRecording] Failed to process audio:', error);
       setProcessedAudio(null);
       if (document.hidden) {
         sendNotification('v11y', 'Processing failed. Please try again.');
