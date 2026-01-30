@@ -563,11 +563,11 @@ function applyVoiceEQ(audio: Float32Array): Float32Array {
   // 2. Low shelf boost at 200Hz (+3dB) - Add warmth
   processed = applyLowShelfFilter(processed, 200, 3);
 
-  // 3. Presence peak at 3kHz (+4dB, Q=1.0) - Clarity
-  processed = applyPeakFilter(processed, 3000, 4, 1.0);
+  // 3. Presence peak at 3kHz (+2dB, Q=1.5) - Gentle clarity boost
+  processed = applyPeakFilter(processed, 3000, 2, 1.5);
 
-  // 4. High shelf boost at 8kHz (+3dB) - Air/brightness
-  processed = applyHighShelfFilter(processed, 8000, 3);
+  // 4. High shelf boost at 10kHz (+2dB) - Subtle air/brightness
+  processed = applyHighShelfFilter(processed, 10000, 2);
 
   return processed;
 }
