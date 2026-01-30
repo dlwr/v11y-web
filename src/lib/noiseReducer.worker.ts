@@ -14,11 +14,12 @@ const SNR_HIGH = 25;
 const SNR_MEDIUM = 15;
 
 // MIN_MASK values: higher = more conservative (preserves more signal)
-const MIN_MASK_VERY_HIGH_SNR = 0.12; // Aggressive noise reduction
-const MIN_MASK_HIGH_SNR = 0.18; // Balanced
-const MIN_MASK_MEDIUM_SNR = 0.25; // Conservative
-const MIN_MASK_LOW_SNR = 0.30; // Preserve quiet speech
-const MIN_MASK_DEFAULT = 0.20; // Fallback for very short audio
+// Raised all values to prevent excessive spectral deletion causing grainy sound
+const MIN_MASK_VERY_HIGH_SNR = 0.20; // More conservative (was 0.12)
+const MIN_MASK_HIGH_SNR = 0.25; // Balanced (was 0.18)
+const MIN_MASK_MEDIUM_SNR = 0.30; // Conservative (was 0.25)
+const MIN_MASK_LOW_SNR = 0.35; // Preserve quiet speech (was 0.30)
+const MIN_MASK_DEFAULT = 0.25; // Fallback for very short audio (was 0.20)
 
 /**
  * Calculate dynamic MIN_MASK based on estimated SNR.
