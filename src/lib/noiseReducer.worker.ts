@@ -1,5 +1,6 @@
 import * as ort from 'onnxruntime-web';
-import { enhanceVoice } from './audioEnhancer';
+// TODO: Re-enable with better tuned parameters
+// import { enhanceVoice } from './audioEnhancer';
 
 // NSNet2 parameters for 48kHz
 const FFT_SIZE = 1024;
@@ -180,11 +181,12 @@ async function processAudio(audioData: Float32Array): Promise<Float32Array> {
   // Return original length
   const denoisedAudio = outputAudio.slice(0, audioData.length);
 
-  // Apply voice enhancement pipeline (compressor, EQ, de-esser, etc.)
-  const enhanced = enhanceVoice(denoisedAudio);
+  // Skip voice enhancement pipeline - it was causing grainy artifacts
+  // TODO: Re-enable with better tuned parameters
+  // const enhanced = enhanceVoice(denoisedAudio);
 
   // Final loudness normalization (-16 LUFS for podcast)
-  return normalizeLoudness(enhanced);
+  return normalizeLoudness(denoisedAudio);
 }
 
 function createHannWindow(size: number): Float32Array {
